@@ -1,0 +1,25 @@
+[project]
+name = "container-escape-backend"
+version = "1.0.0"
+description = "FastAPI backend for Container Escape Detection System"
+requires-python = ">=3.10"
+
+dependencies = [
+    "fastapi==0.104.1",
+    "uvicorn[standard]==0.24.0",
+    "pymongo==4.6.1",
+    "pydantic==2.5.0",
+    "python-dotenv==1.0.0",
+    "structlog==24.1.0",
+    "python-multipart==0.0.6",
+    "httpx==0.25.2",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest==7.4.3",
+    "pytest-asyncio==0.21.1",
+    "httpx[testing]==0.25.2",
+    "black==23.12.0",
+    "ruff==0.1.8",
+]

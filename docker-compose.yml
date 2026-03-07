@@ -1,0 +1,63 @@
+version: '3.9'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      MONGODB_URI: mongodb://admin:password@mongodb:27017
+      BACKEND_URL: http://localhost:8000
+      LOG_LEVEL: INFO
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    command: uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+
+  daemon:
+    build:
+      context: ./daemon
+      dockerfile: Dockerfile
+    environment:
+      MONGODB_URI: mongodb://admin:password@mongodb:27017
+      BACKEND_URL: http://backend:8000
+      LOG_LEVEL: INFO
+    depends_on:
+      - mongodb
+      - backend
+    command: uv run python daemon.py
+    volumes:
+      - ./daemon:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_WS_URL: ws://localhost:8000
+
+volumes:
+  mongodb_data:

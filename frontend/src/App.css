@@ -1,0 +1,27 @@
+.container {
+  @apply max-w-7xl mx-auto px-4;
+}
+
+.card {
+  @apply bg-gray-800 rounded-lg p-6 border border-gray-700;
+}
+
+.btn-primary {
+  @apply px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors;
+}
+
+.btn-danger {
+  @apply px-4 py-2 bg-red-600 hover:bg-red-700 rounded transition-colors;
+}
+
+.status-active {
+  @apply text-green-400;
+}
+
+.status-warning {
+  @apply text-yellow-400;
+}
+
+.status-critical {
+  @apply text-red-400;
+}

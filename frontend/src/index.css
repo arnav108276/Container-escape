@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  @apply bg-gray-900 text-white font-sans;
+}
+
+a {
+  @apply text-blue-400 hover:text-blue-300 transition-colors;
+}
+
+button {
+  @apply font-medium;
+}
