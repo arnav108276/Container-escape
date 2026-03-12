@@ -21,6 +21,10 @@ export const apiClient = {
   // Dashboard
   getDashboardMetrics: () =>
     api.get('/api/dashboard/metrics'),
+
+  // Platform overview
+  getSystemOverview: () =>
+    api.get('/api/system/overview'),
   
   // Alerts
   getAlerts: (containerId?: string, limit: number = 100) =>
@@ -78,6 +82,9 @@ export const apiClient = {
   // Health
   health: () =>
     api.get('/health'),
+
+  ready: () =>
+    api.get('/ready'),
 };
 
 export default api;
