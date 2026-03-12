@@ -11,6 +11,13 @@ const api: AxiosInstance = axios.create({
 
 // API endpoints
 export const apiClient = {
+  // Generic HTTP methods
+  get: (url: string, config?: any) =>
+    api.get(url, config),
+  
+  post: (url: string, data?: any, config?: any) =>
+    api.post(url, data, config),
+  
   // Dashboard
   getDashboardMetrics: () =>
     api.get('/api/dashboard/metrics'),
@@ -18,6 +25,15 @@ export const apiClient = {
   // Alerts
   getAlerts: (containerId?: string, limit: number = 100) =>
     api.get('/api/alerts', { params: { container_id: containerId, limit } }),
+  
+  acknowledgeAlert: (alertId: string, acknowledgedBy: string = 'user') =>
+    api.post(`/api/alerts/${alertId}/acknowledge`, { acknowledged_by: acknowledgedBy }),
+  
+  acknowledgeMultipleAlerts: (alertIds: string[], acknowledgedBy: string = 'user') =>
+    api.post('/api/alerts/acknowledge/multiple', { alert_ids: alertIds, acknowledged_by: acknowledgedBy }),
+  
+  acknowledgeAllAlerts: (acknowledgedBy: string = 'user') =>
+    api.post('/api/alerts/acknowledge/all', { acknowledged_by: acknowledgedBy }),
   
   // Events
   getEvents: (containerId?: string, hours: number = 24, limit: number = 1000) =>
@@ -33,6 +49,9 @@ export const apiClient = {
   getContainerStatus: (containerId: string) =>
     api.get(`/api/containers/${containerId}`),
   
+  getContainerVulnerabilities: (containerId: string, limit: number = 10) =>
+    api.get(`/api/containers/${containerId}/vulnerabilities`, { params: { limit } }),
+  
   quarantineContainer: (containerId: string, reason: string, approvedBy: string) =>
     api.post(`/api/containers/${containerId}/quarantine`, { reason, approved_by: approvedBy }),
   
@@ -46,9 +65,15 @@ export const apiClient = {
   generateReport: (containerId: string, hours: number = 24) =>
     api.post('/api/reports/generate', null, { params: { container_id: containerId, hours } }),
   
-  // Dashboard
-  // getDashboardMetrics: () =>
-  //   api.get('/api/dashboard'),
+  // Admin
+  cleanupAllData: () =>
+    api.post('/api/admin/cleanup/all'),
+  
+  cleanupContainerAlerts: (containerId: string) =>
+    api.post(`/api/admin/cleanup/container/${containerId}`),
+  
+  getAdminStats: () =>
+    api.get('/api/admin/stats'),
   
   // Health
   health: () =>

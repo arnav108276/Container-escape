@@ -10,11 +10,26 @@ interface Container {
   last_event_timestamp?: string;
 }
 
+interface Vulnerability {
+  container_id: string;
+  detected_alerts: number;
+  recent_alerts: Array<{
+    timestamp: string;
+    reason: string;
+    risk_score: number;
+    risk_category: string;
+    severity: string;
+  }>;
+  threat_types: Record<string, number>;
+}
+
 export default function Containers() {
   const [containers, setContainers] = useState<Container[]>([]);
   const [loading, setLoading] = useState(false);
   const [quarantineId, setQuarantineId] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState('');
+  const [vulnerabilities, setVulnerabilities] = useState<Record<string, Vulnerability>>({});
+  const [hoveredContainer, setHoveredContainer] = useState<string | null>(null);
 
   const fetchContainers = async () => {
     setLoading(true);
@@ -25,6 +40,18 @@ export default function Containers() {
       console.error('Failed to fetch containers:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchVulnerabilities = async (containerId: string) => {
+    try {
+      const response = await apiClient.get(`/api/containers/${containerId}/vulnerabilities`);
+      setVulnerabilities(prev => ({
+        ...prev,
+        [containerId]: response.data
+      }));
+    } catch (error) {
+      console.error('Failed to fetch vulnerabilities:', error);
     }
   };
 
@@ -47,7 +74,12 @@ export default function Containers() {
     }
   };
 
-
+  const handleContainerHover = (containerId: string) => {
+    setHoveredContainer(containerId);
+    if (!vulnerabilities[containerId]) {
+      fetchVulnerabilities(containerId);
+    }
+  };
 
   const getRiskColor = (risk: string) => {
     switch (risk) {
@@ -68,6 +100,19 @@ export default function Containers() {
       : status === 'running'
       ? 'text-green-400'
       : 'text-gray-400';
+  };
+
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case 'CRITICAL':
+        return 'text-red-300 bg-red-950';
+      case 'HIGH':
+        return 'text-orange-300 bg-orange-950';
+      case 'MEDIUM':
+        return 'text-yellow-300 bg-yellow-950';
+      default:
+        return 'text-green-300 bg-green-950';
+    }
   };
 
   return (
@@ -98,7 +143,12 @@ export default function Containers() {
             </thead>
             <tbody className="divide-y divide-gray-700">
               {containers.map((container: Container) => (
-                <tr key={container.container_id} className="hover:bg-gray-700 transition">
+                <tr 
+                  key={container.container_id} 
+                  className="hover:bg-gray-700 transition relative"
+                  onMouseEnter={() => handleContainerHover(container.container_id)}
+                  onMouseLeave={() => setHoveredContainer(null)}
+                >
                   <td className="py-4">
                     <div>
                       <div className="font-semibold">{container.name || 'Unnamed'}</div>
@@ -106,10 +156,54 @@ export default function Containers() {
                     </div>
                   </td>
                   <td className={`py-4 ${getStatusColor(container.status)}`}>{container.status}</td>
-                  <td className="py-4">
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getRiskColor(container.risk_level)}`}>
+                  <td className="py-4 relative group">
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold cursor-help ${getRiskColor(container.risk_level)}`}>
                       {container.risk_level}
                     </span>
+                    
+                    {/* Tooltip showing vulnerabilities */}
+                    {hoveredContainer === container.container_id && vulnerabilities[container.container_id] && (
+                      <div className="absolute left-0 top-full mt-2 bg-gray-900 border border-gray-700 rounded-lg p-3 z-50 w-80 shadow-xl">
+                        <div className="text-white text-xs space-y-2">
+                          <div className="font-bold border-b border-gray-700 pb-1">Vulnerabilities Detected</div>
+                          
+                          {vulnerabilities[container.container_id].detected_alerts > 0 ? (
+                            <>
+                              <div className="text-gray-300">
+                                <strong>{vulnerabilities[container.container_id].detected_alerts}</strong> alerts in last 24h
+                              </div>
+                              
+                              {vulnerabilities[container.container_id].recent_alerts.length > 0 && (
+                                <div className="border-t border-gray-700 pt-2">
+                                  <div className="font-semibold text-gray-200 mb-1">Recent Threats:</div>
+                                  {vulnerabilities[container.container_id].recent_alerts.map((alert, idx) => (
+                                    <div key={idx} className="mb-1 py-1 px-2 bg-gray-800 rounded text-left">
+                                      <div className={`text-xs font-semibold ${getCategoryColor(alert.risk_category)}`}>
+                                        {alert.risk_category} (Score: {alert.risk_score})
+                                      </div>
+                                      <div className="text-gray-300 text-xs mt-1 line-clamp-2">{alert.reason}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              
+                              {Object.keys(vulnerabilities[container.container_id].threat_types).length > 0 && (
+                                <div className="border-t border-gray-700 pt-2">
+                                  <div className="font-semibold text-gray-200 mb-1">Threat Types:</div>
+                                  {Object.entries(vulnerabilities[container.container_id].threat_types).map(([type, count]) => (
+                                    <div key={type} className="text-gray-300 text-xs">
+                                      • {type}: <strong>{count}</strong>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <div className="text-gray-400">No vulnerabilities detected</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </td>
                   <td className="py-4">{container.alert_count}</td>
                   <td className="py-4">

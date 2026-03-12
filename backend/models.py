@@ -23,10 +23,14 @@ class Alert(BaseModel):
     timestamp: datetime
     container_id: str
     container_name: Optional[str] = None
+    event_type: Optional[str] = None  # PRIVILEGE_ESCALATION, MOUNT_ATTEMPT, etc.
     reason: str
     risk_score: int
     risk_category: Optional[str] = "UNKNOWN"  # CRITICAL, HIGH, MEDIUM, LOW
     severity: str = "HIGH"
+    acknowledged: bool = False  # Whether alert has been acknowledged/dismissed
+    acknowledged_at: Optional[datetime] = None
+    acknowledged_by: Optional[str] = None
     metadata: Dict[str, Any] = {}
 
 

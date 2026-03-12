@@ -12,7 +12,7 @@ from datetime import datetime
 
 from database import Database
 from models import Alert, SecurityEvent, Container, ForensicReport
-from routes import alerts, events, containers, reports, websocket
+from routes import alerts, events, containers, reports, websocket, admin
 
 log = structlog.get_logger(__name__)
 
@@ -58,6 +58,7 @@ app.include_router(alerts.router, prefix="/api", tags=["alerts"])
 app.include_router(events.router, prefix="/api", tags=["events"])
 app.include_router(containers.router, prefix="/api", tags=["containers"])
 app.include_router(reports.router, prefix="/api", tags=["reports"])
+app.include_router(admin.router, prefix="/api", tags=["admin"])
 
 
 @app.get("/api/dashboard/metrics")

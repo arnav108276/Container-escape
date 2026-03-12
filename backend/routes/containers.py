@@ -344,3 +344,54 @@ async def get_container_risk(container_id: str, request: Request):
     except Exception as e:
         log.error("Failed to get container risk", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/containers/{container_id}/vulnerabilities")
+async def get_container_vulnerabilities(container_id: str, limit: int = 10, request: Request = None):
+    """
+    Get detected vulnerabilities and threats for a container.
+    Returns recent alerts and events showing what threats were detected.
+    """
+    try:
+        db = request.app.state.db
+        cutoff_24h = datetime.utcnow() - timedelta(hours=24)
+        
+        # Get recent alerts (vulnerabilities detected)
+        alerts = list(db.db.alerts.find({
+            'container_id': container_id,
+            'timestamp': {'$gte': cutoff_24h}
+        }).sort('timestamp', -1).limit(limit))
+        
+        # Get recent security events
+        events = list(db.db.security_events.find({
+            'container_id': container_id,
+            'timestamp': {'$gte': cutoff_24h}
+        }).sort('timestamp', -1).limit(limit))
+        
+        # Compile vulnerability summary
+        vulnerability_summary = {
+            'container_id': container_id,
+            'detected_alerts': len(set(str(a['_id']) for a in alerts)),
+            'recent_alerts': [],
+            'threat_types': {}
+        }
+        
+        # Add recent alerts with details
+        for alert in alerts[:5]:  # Show top 5
+            vulnerability_summary['recent_alerts'].append({
+                'timestamp': alert.get('timestamp', '').isoformat() if hasattr(alert.get('timestamp', ''), 'isoformat') else str(alert.get('timestamp', '')),
+                'reason': alert.get('reason', 'Unknown threat'),
+                'risk_score': alert.get('risk_score', 0),
+                'risk_category': alert.get('risk_category', 'UNKNOWN'),
+                'severity': alert.get('severity', 'unknown')
+            })
+        
+        # Count threat types from events
+        for event in events:
+            threat_type = event.get('event_type', 'unknown')
+            vulnerability_summary['threat_types'][threat_type] = vulnerability_summary['threat_types'].get(threat_type, 0) + 1
+        
+        return vulnerability_summary
+    except Exception as e:
+        log.error("Failed to get container vulnerabilities", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))

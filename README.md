@@ -1,101 +1,512 @@
-# Container Escape Detection & Prevention System Using eBPF
+# Container Escape Detection & Prevention System using eBPF
 
-Real-time runtime security monitoring for containerized environments using Linux eBPF technology.
+Real-time runtime security monitoring for containerized environments using Linux eBPF technology. Detects kernel-level threats, calculates risk scores, and automatically quarantines compromised containers.
+
+---
+
+## 🎯 Quick Start (Docker)
+
+```bash
+# 1. Start services
+docker-compose up -d
+
+# 2. Access applications
+# Dashboard:  http://localhost:5173
+# API Docs:   http://localhost:8000/docs
+# API Health: http://localhost:8000/health
+
+# 3. Verify
+docker ps
+curl http://localhost:8000/health
+```
+
+---
+
+## 📋 Table of Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Features](#features)
+- [Installation](#installation)
+- [Alert Management](#alert-management)
+- [API Reference](#api-reference)
+- [Administration](#administration)
+- [Troubleshooting](#troubleshooting)
+
+---
 
 ## 🎯 Overview
 
-This system detects and prevents container escape attacks by:
-- **Kernel-level syscall monitoring** using eBPF for zero-overhead visibility
-- **Real-time threat detection** with risk scoring and automatic response
-- **Automated container quarantine** to isolate compromised containers
-- **Forensic logging** for compliance and incident investigation
-- **Web dashboard** for real-time monitoring and management
+This system provides **kernel-level container security monitoring** with automatic threat response:
+
+- **eBPF Monitoring**: Zero-overhead syscall monitoring at kernel level
+- **Real-time Detection**: Privilege escalation, mount attempts, file access, process tracing
+- **Risk Scoring**: Precise risk calculation (0-100) based on attack patterns
+- **Auto Quarantine**: Containers auto-paused when threat score ≥75
+- **Dashboard Control**: Live monitoring, container management, alert review
+- **Forensic Logging**: Complete audit trail in MongoDB
+
+---
 
 ## 🏗️ Architecture
 
+```
+Kernel (eBPF Programs)
+    ↓ (syscalls)
+Daemon (Event Processor + Risk Scorer)
+    ↓ (alerts)
+Backend (FastAPI)
+    ↓ (JSON)
+Frontend (React)
+    ↓ (WebUI)
+User Dashboard
+```
+
 ### Components
-- **ebpf/** - Kernel programs monitoring privilege escalation, unauthorized file access, and escape attempts
-- **daemon/** - User-space event processor enriching and scoring detected threats
-- **backend/** - FastAPI REST API for alerts, events, and container management
-- **frontend/** - React dashboard for real-time monitoring and control
-- **database/** - MongoDB for persistent storage of events and forensic data
-- **aws/** - Terraform and deployment scripts for cloud infrastructure
-- **cicd/** - Docker Compose and GitHub Actions for automated deployment
 
-## 🚀 Quick Start
+| Component | Purpose | Tech |
+|-----------|---------|------|
+| **ebpf/** | Kernel monitoring (privilege escalation, mounts, file access) | C, BCC |
+| **daemon/** | Event enrichment, risk scoring, quarantine execution | Python |
+| **backend/** | REST API for alerts, containers, events, reports | FastAPI |
+| **frontend/** | Real-time dashboard and monitoring UI | React, TypeScript, Tailwind |
+| **database/** | Persistent storage for alerts, events, reports | MongoDB |
 
-### Local Development with Docker
+---
+
+## 📊 Features
+
+### Detection (What We Catch)
+
+| Threat Type | Example | Score |
+|-------------|---------|-------|
+| **Privilege Escalation** | Container tries `setuid(0)` | 40-100 |
+| **Mount Attempts** | Container tries `mount(/host)` | 35-100 |
+| **File Access** | Reading `/etc/shadow` | 20-100 |
+| **Process Tracing** | Container uses `ptrace()` | 30-100 |
+| **Capability Changes** | Adding `CAP_SYS_ADMIN` | 30-100 |
+
+### Response Actions
+
+| Risk Level | Threshold | Action |
+|------------|-----------|--------|
+| **CRITICAL** | ≥75 | Auto-quarantine container |
+| **HIGH** | 50-74 | Alert + log |
+| **MEDIUM** | 40-49 | Log + monitor |
+| **LOW** | <40 | Forensic log only |
+
+### Dashboard Features
+
+- ✅ Live container inventory with risk levels
+- ✅ Real-time alert feed with event types
+- ✅ Alert filtering and bulk acknowledgment
+- ✅ Container quarantine/unquarantine controls
+- ✅ Vulnerability details on hover
+- ✅ Database statistics and management
+
+---
+
+## 💻 Installation
+
+### Prerequisites
+
+- **Docker**: 20.10+
+- **Docker Compose**: 1.29+
+- **Linux kernel**: 5.8+ (for eBPF)
+
+Or for manual setup:
+- Python 3.10+, Node.js 18+, MongoDB 6.0+, Make, GCC
+
+### Docker Setup (Recommended)
+
 ```bash
-# Copy environment template
+# Clone and start
+git clone <repo> && cd major2
 cp .env.example .env
-
-# Start all services
 docker-compose up -d
 
-# Services available at:
-# - Frontend: http://localhost:5173
-# - Backend API: http://localhost:8000
-# - MongoDB: localhost:27017
+# View status
+docker-compose ps
+docker-compose logs backend -f
 ```
 
 ### Manual Setup
 
-**Requirements:**
-- Linux kernel 5.8+ with eBPF support
-- Python 3.10+
-- Node.js 18+
-- MongoDB 6.0+
-- uv (Python package manager)
-
-**Build eBPF programs:**
+**eBPF Programs:**
 ```bash
-cd ebpf
-make
+cd ebpf && make
 ```
 
-**Start backend:**
+**Backend:**
 ```bash
 cd backend
 uv pip install -r pyproject.toml
-uv run uvicorn main:app --reload
+uv run uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-**Start daemon:**
+**Daemon:**
 ```bash
 cd daemon
 uv pip install -r pyproject.toml
 uv run python daemon.py
 ```
 
-**Start frontend:**
+**Frontend:**
 ```bash
 cd frontend
-npm install
-npm run dev
+npm install && npm run dev
 ```
 
-## 📊 Key Features
+---
 
-### ✅ Detection Capabilities
-- **Privilege Escalation**: setuid/setgid attempts, capability modifications
-- **Unauthorized Filesystem Access**: /proc, /sys, /etc access from containers
-- **Mount Operations**: Attempts to mount host filesystems in containers
-- **Process Tracing**: ptrace syscalls from untrusted processes
-- **Network Socket Creation**: Suspicious network operations
+## 🚨 Alert Management
 
-### ✅ Response Actions
-- **Automatic Quarantine**: Pause container and disconnect network
-- **Real-time Alerts**: WebSocket-based notifications to dashboard
-- **Forensic Logging**: Complete event timeline for investigation
-- **Risk Scoring**: Contextual threat assessment (0-100)
+### How Alerts Work
 
-### ✅ Monitoring & Analysis
-- **Live Event Stream**: Real-time syscall visualization
-- **Forensic Reports**: Detailed analysis and recommendations
-- **Container Risk Assessment**: Per-container threat scoring
-- **Dashboard Metrics**: System-wide security overview
+1. **eBPF detects** syscall event from container
+2. **Daemon processes** event and calculates risk score
+3. **Deduplication** - same container + same attack type = UPDATE existing alert (not duplicate)
+4. **Backend stores** alert with `event_type`, `risk_score`, `risk_category`
+5. **Dashboard shows** unacknowledged alerts
+6. **User dismisses** alert by clicking "Dismiss" or "Acknowledge All"
+7. **Alert hidden** from dashboard after acknowledgment
 
-## 🔌 API Endpoints
+### Alert Deduplication Rule
+
+**Only 1 alert per (container, event_type) pair:**
+
+```
+Event 1: Container A → PRIVILEGE_ESCALATION
+         Alert created at 10:00
+
+Event 2: Container A → PRIVILEGE_ESCALATION (same type)
+         Existing alert UPDATED (timestamp = 10:01)
+         NO DUPLICATE created
+
+Event 3: Container A → MOUNT_ATTEMPT (different type)
+         NEW alert created at 10:02
+         Now 2 alerts for Container A
+
+Result: Dashboard shows 2 alerts, not 3
+```
+
+### Managing Alerts on Dashboard
+
+| Action | How | Result |
+|--------|-----|--------|
+| Dismiss One | Click [Dismiss] button | 1 alert hidden |
+| Dismiss Multiple | Check ☐ boxes, click [Acknowledge Selected (N)] | N alerts hidden |
+| Dismiss All | Click [Acknowledge All (N)] | All hidden, dashboard clean |
+| View Details | Read alert card (reason, event_type, risk_score) | Understand threat |
+| Check Vulnerabilities | Hover over Risk Level in Containers page | See recent threats |
+
+### Example: Container Under Attack
+
+```
+10:00 - Privilege escalation attempt
+        Alert 1: PRIVILEGE_ESCALATION (Score: 85) ← Created
+
+10:01 - Same attack again
+        Alert 1: Updated (timestamp: 10:01)                ← Deduplicated
+
+10:02 - Mount attempt
+        Alert 2: MOUNT_ATTEMPT (Score: 72)        ← Different type, new alert
+
+10:03 - User reviews alerts
+        Dashboard shows: 2 alerts
+
+10:04 - User dismisses Alert 1
+        Dashboard shows: 1 alert (just MOUNT_ATTEMPT)
+
+10:05 - Another privilege escalation detected
+        Alert 3: PRIVILEGE_ESCALATION (Score: 88) ← New (prev was dismissed)
+        Dashboard shows: 2 alerts again
+```
+
+---
+
+## 🔌 API Reference
+
+### Alerts API
+
+**Get Unacknowledged Alerts:**
+```http
+GET /api/alerts?limit=100
+```
+Response: List of unacknowledged alerts only
+
+**Dismiss Single Alert:**
+```http
+POST /api/alerts/{alert_id}/acknowledge
+Content-Type: application/json
+{ "acknowledged_by": "admin" }
+```
+
+**Dismiss Multiple Alerts:**
+```http
+POST /api/alerts/acknowledge/multiple
+{ "alert_ids": ["id1", "id2"], "acknowledged_by": "admin" }
+```
+
+**Dismiss All Alerts:**
+```http
+POST /api/alerts/acknowledge/all
+{ "acknowledged_by": "admin" }
+```
+
+### Container API
+
+**List Containers with Risk:**
+```http
+GET /api/containers
+```
+Response: Container inventory with calculated risk levels
+
+**Get Container Vulnerabilities:**
+```http
+GET /api/containers/{container_id}/vulnerabilities?limit=10
+```
+Response: Recent alerts and threat breakdown
+
+**Quarantine Container:**
+```http
+POST /api/containers/{container_id}/quarantine
+{ "reason": "Auto-quarantine", "approved_by": "admin" }
+```
+
+**Unquarantine Container:**
+```http
+POST /api/containers/{container_id}/unquarantine
+```
+
+### Events API
+
+**Get Security Events:**
+```http
+GET /api/events?hours=24&limit=1000
+```
+
+### Admin API
+
+**View Database Stats:**
+```http
+GET /api/admin/stats
+```
+Response: Total alerts, events, containers, breakdown by container
+
+**Clean All Data (Testing):**
+```http
+POST /api/admin/cleanup/all
+```
+Response: Count of deleted documents
+
+**Clean Specific Container:**
+```http
+POST /api/admin/cleanup/container/{container_id}
+```
+
+---
+
+## ⚙️ Administration
+
+### Cleaning Test Data
+
+MongoDB persists data even after `docker-compose down`. Clean via admin UI:
+
+1. Go to **Alerts** page
+2. Scroll to "Database Statistics"
+3. Click **"Clear All Data"** (for full reset) OR
+4. Click **"Clean (N)"** next to container name (for specific container)
+
+Or via API:
+```bash
+curl -X POST http://localhost:8000/api/admin/cleanup/all
+```
+
+### Monitoring
+
+**Check system health:**
+```bash
+curl http://localhost:8000/health
+```
+
+**View logs:**
+```bash
+docker-compose logs daemon -f    # eBPF events
+docker-compose logs backend -f   # API activity
+docker-compose logs frontend -f  # UI logs
+```
+
+**Connect to MongoDB:**
+```bash
+docker exec -it major2_mongodb_1 mongosh mongodb://admin:password@localhost:27017
+```
+
+### Container Quarantine
+
+**How it works:**
+1. Risk score ≥75 → Auto-quarantine triggered
+2. Container PAUSED (stops consuming resources)
+3. Network DISCONNECTED (isolated from others)
+4. Status updated in dashboard
+5. User can manually unquarantine when safe
+
+**Manual actions:**
+```
+Dashboard → Containers → [Quarantine] button
+```
+
+---
+
+## 🔍 Troubleshooting
+
+### Issue: Alerts not appearing
+
+**Causes & Fixes:**
+- ❌ eBPF program not loaded → Check kernel version (≥5.8)
+- ❌ Daemon not running → `docker-compose logs daemon`
+- ❌ Container not detected → Run sync script to populate
+- ❌ Events not reaching backend → Check logs: `curl http://localhost:8000/health`
+
+### Issue: Seeing old test alerts
+
+**Solution:**
+- Old MongoDB data persists after `docker-compose down`
+- Use admin cleanup: **Alerts page** → **"Clear All Data"** button
+- Or: `curl -X POST http://localhost:8000/api/admin/cleanup/all`
+
+### Issue: Containers not showing
+
+**Causes & Fixes:**
+- ❌ Sync not run → Daemon needs to sync containers to backend
+- ❌ MongoDB down → Check: `docker-compose ps`
+
+### Issue: Quarantine not working
+
+**Check:**
+1. Container actually paused: `docker ps` (see STATUS)
+2. Network disconnected: `docker inspect <container>`
+3. Logs: `docker-compose logs daemon | grep -i quarantine`
+
+### Issue: Dashboard not responding
+
+**Troubleshoot:**
+1. Check frontend: `docker-compose logs frontend`
+2. Check API: `curl http://localhost:8000/health`
+3. Check MongoDB: `docker-compose ps mongodb`
+4. Restart: `docker-compose restart`
+
+### Reset Everything
+```bash
+# Full reset (removes all data)
+docker-compose down -v
+docker-compose up -d
+
+# Wait for MongoDB to initialize (~30 seconds)
+sleep 30
+
+# Verify
+curl http://localhost:8000/health
+```
+
+---
+
+## 🛠️ Development
+
+### Technology Stack
+
+| Layer | Tech |
+|-------|------|
+| Kernel | eBPF (C, BCC), Linux 5.8+ |
+| Backend | Python 3.10, FastAPI, MongoDB |
+| Frontend | React 18, TypeScript, Tailwind CSS |
+| DevOps | Docker, Docker Compose |
+
+### Project Structure
+
+```
+major2/
+├── ebpf/              # Kernel monitoring programs
+├── daemon/            # Event processor and risk scorer
+├── backend/           # FastAPI REST API
+├── frontend/          # React dashboard
+├── docker-compose.yml # Service orchestration
+└── README.md          # This file
+```
+
+### Building
+
+```bash
+# Build Docker images
+docker-compose build
+
+# Test build
+docker-compose build --no-cache
+
+# Push to registry (if configured)
+docker-compose push
+```
+
+### Testing
+
+```bash
+# Backend tests
+cd backend && uv run pytest
+
+# Frontend tests
+cd frontend && npm test
+
+# Full service test
+curl http://localhost:8000/health
+curl http://localhost:8000/api/dashboard/metrics
+```
+
+---
+
+## 📚 Key Concepts
+
+### Risk Scoring
+
+- **Base Weight**: Event type (PRIVILEGE_ESCALATION = 40 points)
+- **Target Multiplier**: Attack target (/etc/shadow = 3x)
+- **Escalation Bonus**: UID 0 attempt = +25 points
+- **Formula**: min(base × multiplier + bonus, 100)
+
+### Categorization
+
+- **CRITICAL** (≥75): Auto-quarantine
+- **HIGH** (50-74): Alert only
+- **MEDIUM** (40-49): Log only
+- **LOW** (<40): Forensic log
+
+### Deduplication
+
+Alerts deduplicated by `(container_id, event_type)` pair. Same attack repeated → timestamp updated, no new alert. Different attack type → new alert created.
+
+---
+
+## 📞 Support
+
+### Common Tasks
+
+| Task | Action |
+|------|--------|
+| View alerts | Go to **Alerts** page |
+| Dismiss alerts | Check ☐, click [Acknowledge Selected/All] |
+| Quarantine container | Click [Quarantine] in **Containers** page |
+| Check vulnerability details | Hover over Risk Level badge in **Containers** |
+| Clean test data | Click "Clear All Data" in **Alerts** page |
+| Check system health | `curl http://localhost:8000/health` |
+
+### Documentation
+
+- **API Details**: `http://localhost:8000/docs` (interactive Swagger)
+- **Health Check**: `http://localhost:8000/health`
+- **Dashboard**: `http://localhost:5173`
+
+---
+
+## 📄 Endpoint Endpoints
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
