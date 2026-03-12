@@ -1,212 +1,22 @@
-# #!/usr/bin/env python3
-# """
-# eBPF-based Container Escape Detection & Prevention System
-# User-space daemon for processing kernel events
-# """
-
-# import os
-# import sys
-# import time
-# import logging
-# from typing import Optional, Dict, Any
-# from dataclasses import dataclass
-# from datetime import datetime
-
-# import structlog
-# from pydantic import BaseModel
-# import httpx
-
-# from event_processor import EventProcessor
-# from risk_scorer import RiskScorer
-# from container_manager import ContainerManager
-# from logger import ForensicLogger
-
-# # Configure logging
-# log = structlog.get_logger(__name__)
-
-
-# @dataclass
-# class SecurityEvent(BaseModel):
-#     timestamp_ns: int
-#     pid: int
-#     uid: int
-#     gid: int
-#     event_type: int
-#     risk_level: int
-#     container_id: str
-#     filepath: str
-#     syscall_nr: int
-#     syscall_arg0: int = 0
-#     syscall_arg1: int = 0
-#     syscall_arg2: int = 0
-#     syscall_arg3: int = 0
-
-
-# class EventDaemon:
-#     """Main daemon for processing security events from eBPF programs"""
-    
-#     def __init__(self):
-#         self.backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
-#         self.mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
-#         self.log_level = os.getenv("LOG_LEVEL", "INFO")
-        
-#         self.event_processor = EventProcessor()
-#         self.risk_scorer = RiskScorer()
-#         self.container_manager = ContainerManager()
-#         self.forensic_logger = ForensicLogger(self.mongodb_uri)
-        
-#         self.http_client = httpx.Client(timeout=10.0)
-#         self.running = False
-        
-#         log.info("Daemon initialized", backend=self.backend_url)
-    
-#     def process_event(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-#         """
-#         Process a single security event from eBPF
-        
-#         Steps:
-#         1. Enrich event with additional context
-#         2. Calculate risk score
-#         3. Apply detection rules
-#         4. Log forensic data
-#         5. Send alert to backend if high-risk
-#         6. Execute response actions (quarantine, isolation)
-#         """
-#         try:
-#             # Parse event
-#             sec_event = SecurityEvent(**event)
-            
-#             log.info(
-#                 "Event received",
-#                 pid=sec_event.pid,
-#                 event_type=sec_event.event_type,
-#                 container_id=sec_event.container_id
-#             )
-            
-#             # Enrich event
-#             enriched = self.event_processor.enrich(sec_event)
-            
-#             # Score risk
-#             enriched['risk_score'] = self.risk_scorer.calculate(enriched)
-            
-#             # Log forensic data
-#             self.forensic_logger.log_event(enriched)
-            
-#             # Determine if quarantine is needed
-#             if enriched['risk_score'] >= 75:  # Critical/High risk threshold
-#                 log.warning(
-#                     "Critical event detected - initiating quarantine",
-#                     container_id=sec_event.container_id,
-#                     risk_score=enriched['risk_score']
-#                 )
-                
-#                 # Quarantine container
-#                 self.container_manager.quarantine(sec_event.container_id)
-                
-#                 # Send alert to backend
-#                 self._send_alert(enriched)
-            
-#             return enriched
-            
-#         except Exception as e:
-#             log.error("Error processing event", error=str(e))
-#             return None
-    
-#     def _send_alert(self, event: Dict[str, Any]) -> bool:
-#         """Send high-risk alert to backend"""
-#         try:
-#             response = self.http_client.post(
-#                 f"{self.backend_url}/api/alerts",
-#                 json={
-#                     "timestamp": datetime.fromtimestamp(
-#                         event['timestamp_ns'] / 1e9
-#                     ).isoformat(),
-#                     "container_id": event['container_id'],
-#                     "reason": event.get('description', 'Unknown threat'),
-#                     "risk_score": event['risk_score'],
-#                     "metadata": event
-#                 }
-#             )
-#             log.info("Alert sent to backend", status=response.status_code)
-#             return response.status_code == 200
-#         except Exception as e:
-#             log.error("Failed to send alert", error=str(e))
-#             return False
-    
-#     def _sync_containers(self) -> bool:
-#         """Sync running containers with backend"""
-#         try:
-#             containers = self.container_manager.get_running_containers()
-#             if containers:
-#                 response = self.http_client.post(
-#                     f"{self.backend_url}/api/containers/sync",
-#                     json={"containers": containers}
-#                 )
-#                 log.info("Containers synced", count=len(containers), status=response.status_code)
-#                 return response.status_code in [200, 201]
-#             return False
-#         except Exception as e:
-#             log.error("Failed to sync containers", error=str(e))
-#             return False
-    
-#     def run(self):
-#         """Main daemon loop - simulated event receiver"""
-#         self.running = True
-#         log.info("Daemon started, waiting for events...")
-        
-#         try:
-#             # Initial container sync
-#             self._sync_containers()
-            
-#             last_sync = time.time()
-            
-#             # In production, this would read from eBPF ring buffer
-#             # bpf_buffer = BPFRingBuffer(...)
-#             # bpf_buffer.open_ring_buffer(callback=self.process_event)
-            
-#             while self.running:
-#                 # Sync containers every 10 seconds
-#                 if time.time() - last_sync > 10:
-#                     self._sync_containers()
-#                     last_sync = time.time()
-                
-#                 # Simulate event processing
-#                 # In production, events would be received from syscall tracing
-#                 time.sleep(0.1)
-        
-#         except KeyboardInterrupt:
-#             log.info("Daemon shutting down")
-#             self.running = False
-#         except Exception as e:
-#             log.error("Daemon error", error=str(e))
-#             sys.exit(1)
-    
-#     def shutdown(self):
-#         """Graceful shutdown"""
-#         self.running = False
-#         self.http_client.close()
-#         self.forensic_logger.close()
-#         log.info("Daemon stopped")
-
-
-# if __name__ == "__main__":
-#     daemon = EventDaemon()
-#     daemon.run()
-
-
-
 #!/usr/bin/env python3
 """
 eBPF-based Container Escape Detection & Prevention System
 User-space daemon for processing kernel events
+
+This daemon acts as the control plane for the container escape detection system:
+1. Receives security events from eBPF programs via ring buffer
+2. Enriches events with container context
+3. Calculates risk scores
+4. Logs forensic data
+5. Sends alerts to backend
+6. Executes response actions (quarantine, isolation)
 """
 
 import os
 import sys
 import time
-import random
+import logging
 from typing import Optional, Dict, Any
-from dataclasses import dataclass
 from datetime import datetime
 
 import structlog
@@ -218,10 +28,26 @@ from risk_scorer import RiskScorer
 from container_manager import ContainerManager
 from logger import ForensicLogger
 
+# Configure structured logging
 log = structlog.get_logger(__name__)
 
 
 class SecurityEvent(BaseModel):
+    """
+    Schema for security events from eBPF programs
+    
+    Attributes:
+        timestamp_ns: Event timestamp in nanoseconds
+        pid: Process ID that triggered the event
+        uid: User ID of the process
+        gid: Group ID of the process
+        event_type: Type of security event (1=file access, 2=syscall, 3=network, etc.)
+        risk_level: Initial risk level from eBPF heuristics (0-100)
+        container_id: Target container ID
+        filepath: Path of accessed file or resource
+        syscall_nr: Syscall number if applicable
+        syscall_arg0-3: Syscall arguments for forensic analysis
+    """
     timestamp_ns: int
     pid: int
     uid: int
@@ -238,158 +64,256 @@ class SecurityEvent(BaseModel):
 
 
 class EventDaemon:
-    """Main daemon for processing security events from eBPF programs"""
+    """
+    Main daemon for processing security events from eBPF programs
+    
+    Responsibilities:
+    - Receive events from kernel eBPF ring buffer
+    - Enrich events with container metadata
+    - Calculate risk scores using ML-based scoring
+    - Store forensic logs in MongoDB
+    - Alert backend API for high-risk events
+    - Execute automated response actions
+    """
 
     def __init__(self):
+        """Initialize daemon with configuration and components"""
         self.backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
         self.mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
-
+        self.log_level = os.getenv("LOG_LEVEL", "INFO")
+        
+        # Initialize components
         self.event_processor = EventProcessor()
         self.risk_scorer = RiskScorer()
         self.container_manager = ContainerManager()
         self.forensic_logger = ForensicLogger(self.mongodb_uri)
-
+        
         self.http_client = httpx.Client(timeout=10.0)
         self.running = False
-
-        log.info("Daemon initialized", backend=self.backend_url)
+        
+        log.info("Daemon initialized", backend_url=self.backend_url)
 
     def process_event(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-
+        """
+        Process a single security event from eBPF
+        
+        Processing pipeline:
+        1. Validate and parse event
+        2. Enrich event with container context (image, labels, networks)
+        3. Calculate risk score using ML model
+        4. Log forensic data to MongoDB
+        5. Determine response action based on risk level
+        6. Send alert to backend if high-risk
+        7. Execute response actions (quarantine, isolation, kill process)
+        
+        Args:
+            event: Raw event dict from eBPF ring buffer
+            
+        Returns:
+            Enriched event dict with risk score, or None on error
+        """
         try:
+            # Step 1: Validate and parse event
             sec_event = SecurityEvent(**event)
-
+            
             log.info(
                 "Event received",
                 pid=sec_event.pid,
                 event_type=sec_event.event_type,
-                container_id=sec_event.container_id
+                container_id=sec_event.container_id,
+                filepath=sec_event.filepath
             )
-
+            
+            # Step 2: Enrich event with additional context
             enriched = self.event_processor.enrich(sec_event)
-
-            enriched["risk_score"] = self.risk_scorer.calculate(enriched)
-
+            
+            # Step 3: Calculate risk score
+            enriched['risk_score'] = self.risk_scorer.calculate(enriched)
+            
+            # Step 4: Log forensic data
             self.forensic_logger.log_event(enriched)
-
-            if enriched["risk_score"] >= 75:
-
+            
+            # Step 5-7: Determine response based on risk level
+            # Critical/High risk threshold: >= 75
+            if enriched['risk_score'] >= 75:
                 log.warning(
-                    "Critical event detected",
+                    "Critical event detected - initiating response",
                     container_id=sec_event.container_id,
-                    risk_score=enriched["risk_score"]
+                    risk_score=enriched['risk_score'],
+                    event_type=sec_event.event_type
                 )
-
+                
+                # Quarantine container
                 self.container_manager.quarantine(sec_event.container_id)
-
+                
+                # Send alert to backend
                 self._send_alert(enriched)
-
+            
+            # Medium risk threshold: 50-74
+            elif enriched['risk_score'] >= 50:
+                log.warning(
+                    "Medium risk event detected",
+                    container_id=sec_event.container_id,
+                    risk_score=enriched['risk_score']
+                )
+                # Send to backend for monitoring but don't quarantine
+                self._send_alert(enriched)
+            
             return enriched
-
+            
         except Exception as e:
-            log.error("Error processing event", error=str(e))
+            log.error("Error processing event", error=str(e), exc_info=True)
             return None
 
-    def _send_alert(self, event: Dict[str, Any]):
-
+    def _send_alert(self, event: Dict[str, Any]) -> bool:
+        """
+        Send security alert to backend API
+        
+        Args:
+            event: Enriched event dict with risk score
+            
+        Returns:
+            True if alert sent successfully, False otherwise
+        """
         try:
+            alert_payload = {
+                "timestamp": datetime.fromtimestamp(
+                    event['timestamp_ns'] / 1e9
+                ).isoformat(),
+                "container_id": event['container_id'],
+                "reason": event.get('description', 'Container escape attempt detected'),
+                "risk_score": event['risk_score'],
+                "event_type": event.get('event_type', 'unknown'),
+                "metadata": {
+                    "filepath": event.get('filepath'),
+                    "pid": event.get('pid'),
+                    "uid": event.get('uid'),
+                    "syscall_nr": event.get('syscall_nr')
+                }
+            }
+            
             response = self.http_client.post(
                 f"{self.backend_url}/api/alerts",
-                json={
-                    "timestamp": datetime.fromtimestamp(
-                        event["timestamp_ns"] / 1e9
-                    ).isoformat(),
-                    "container_id": event["container_id"],
-                    "reason": event.get("description", "Container escape attempt detected"),
-                    "risk_score": event["risk_score"],
-                    "metadata": event
-                }
+                json=alert_payload,
+                timeout=5.0
             )
-
-            log.info("Alert sent", status=response.status_code)
-
+            
+            response.raise_for_status()
+            
+            log.info(
+                "Alert sent to backend",
+                status_code=response.status_code,
+                container_id=event['container_id']
+            )
+            return response.status_code in [200, 201]
+            
         except Exception as e:
-            log.error("Failed to send alert", error=str(e))
+            log.error(
+                "Failed to send alert",
+                error=str(e),
+                container_id=event.get('container_id')
+            )
+            return False
 
-    def _sync_containers(self):
-
+    def _sync_containers(self) -> bool:
+        """
+        Sync running containers with backend
+        
+        Periodically sync the list of monitored containers to keep
+        backend inventory in sync with actual running containers.
+        
+        Returns:
+            True if sync successful, False otherwise
+        """
         try:
             containers = self.container_manager.get_running_containers()
-
+            
             if containers:
                 response = self.http_client.post(
                     f"{self.backend_url}/api/containers/sync",
-                    json={"containers": containers}
+                    json={"containers": containers},
+                    timeout=5.0
                 )
-
-                log.info("Containers synced", count=len(containers))
-
+                
+                response.raise_for_status()
+                
+                log.info(
+                    "Containers synced",
+                    count=len(containers),
+                    status_code=response.status_code
+                )
+                return response.status_code in [200, 201]
+            
+            return False
+            
         except Exception as e:
-            log.error("Failed to sync containers", error=str(e))
+            log.error("Failed to sync containers", error=str(e), exc_info=True)
+            return False
 
     def run(self):
-
+        """
+        Main daemon loop
+        
+        Process events from eBPF ring buffer and maintain container sync.
+        In production, this reads events from:
+            bpf_buffer = BPFRingBuffer(...)
+            bpf_buffer.open_ring_buffer(callback=self.process_event)
+        
+        For development without kernel support, this waits for external events.
+        """
         self.running = True
-        log.info("Daemon started")
-
+        log.info("Daemon started, waiting for events...")
+        
         last_sync = time.time()
-
-        demo_events = [
-            {
-                "container_id": "nginx-container",
-                "filepath": "/etc/shadow",
-                "event_type": 1
-            },
-            {
-                "container_id": "backend-container",
-                "filepath": "/proc/kcore",
-                "event_type": 2
-            },
-            {
-                "container_id": "vulnerable-container",
-                "filepath": "/root/.ssh/id_rsa",
-                "event_type": 3
-            }
-        ]
-
+        
+        # In production, uncomment to enable eBPF event monitoring:
+        # -------------------------------------------------------
+        # try:
+        #     from bcc import BPF
+        #     
+        #     # Load eBPF programs
+        #     bpf = BPF(src_file="detections.c", debug=0)
+        #     bpf.attach_kprobe(event="do_mount", fn_name="trace_mount")
+        #     
+        #     # Open ring buffer for events
+        #     ring_buf = bpf["events"]
+        #     ring_buf.open_ring_buffer(callback=self.process_event)
+        #     
+        #     log.info("eBPF programs loaded and attached")
+        # except Exception as e:
+        #     log.error("Failed to load eBPF programs", error=str(e))
+        
         try:
-
+            # Initial container sync
             self._sync_containers()
-
+            
             while self.running:
-
+                # Sync containers every 10 seconds
                 if time.time() - last_sync > 10:
                     self._sync_containers()
                     last_sync = time.time()
-
-                demo = random.choice(demo_events)
-
-                fake_event = {
-                    "timestamp_ns": int(time.time() * 1e9),
-                    "pid": random.randint(1000, 5000),
-                    "uid": 0,
-                    "gid": 0,
-                    "event_type": demo["event_type"],
-                    "risk_level": 90,
-                    "container_id": demo["container_id"],
-                    "filepath": demo["filepath"],
-                    "syscall_nr": 105
-                }
-
-                self.process_event(fake_event)
-
-                time.sleep(8)
-
+                
+                # Poll for events (in production this would be event-driven)
+                time.sleep(0.1)
+        
         except KeyboardInterrupt:
-            log.info("Daemon stopped")
+            log.info("Daemon shutting down (KeyboardInterrupt)")
             self.running = False
+        except Exception as e:
+            log.error("Daemon error", error=str(e), exc_info=True)
+            sys.exit(1)
 
     def shutdown(self):
+        """Graceful shutdown of daemon components"""
         self.running = False
         self.http_client.close()
         self.forensic_logger.close()
+        log.info("Daemon stopped")
 
 
 if __name__ == "__main__":
     daemon = EventDaemon()
-    daemon.run()
+    try:
+        daemon.run()
+    except KeyboardInterrupt:
+        daemon.shutdown()

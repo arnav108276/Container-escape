@@ -13,20 +13,22 @@ export default function Containers() {
   const [containers, setContainers] = useState<Container[]>([]);
   const [loading, setLoading] = useState(false);
   const [quarantineId, setQuarantineId] = useState<string | null>(null);
+  const [testDataLoading, setTestDataLoading] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+
+  const fetchContainers = async () => {
+    setLoading(true);
+    try {
+      const response = await apiClient.listContainers();
+      setContainers(response.data.containers || []);
+    } catch (error) {
+      console.error('Failed to fetch containers:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchContainers = async () => {
-      setLoading(true);
-      try {
-        const response = await apiClient.listContainers();
-        setContainers(response.data.containers || []);
-      } catch (error) {
-        console.error('Failed to fetch containers:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchContainers();
     const interval = setInterval(fetchContainers, 10000);
     return () => clearInterval(interval);
@@ -37,10 +39,27 @@ export default function Containers() {
       await apiClient.quarantineContainer(containerId, 'Manual quarantine', 'admin');
       setQuarantineId(containerId);
       // Refresh list
-      const response = await apiClient.listContainers();
-      setContainers(response.data.containers || []);
+      fetchContainers();
+      setSuccessMessage(`Container ${containerId.slice(0, 12)} quarantined successfully!`);
+      setTimeout(() => setSuccessMessage(''), 3000);
     } catch (error) {
       console.error('Failed to quarantine container:', error);
+    }
+  };
+
+  const handleGenerateTestData = async () => {
+    setTestDataLoading(true);
+    try {
+      const response = await apiClient.generateTestAlerts();
+      console.log('Test data generated:', response);
+      // Refresh containers to show new risk levels
+      await fetchContainers();
+      setSuccessMessage('Test alerts generated! Risk levels updated.');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (error) {
+      console.error('Failed to generate test data:', error);
+    } finally {
+      setTestDataLoading(false);
     }
   };
 
@@ -67,7 +86,22 @@ export default function Containers() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-4xl font-bold">Containers</h1>
+      <div className="flex justify-between items-center">
+        <h1 className="text-4xl font-bold">Containers</h1>
+        <button
+          onClick={handleGenerateTestData}
+          disabled={testDataLoading}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 rounded text-sm transition"
+        >
+          {testDataLoading ? 'Generating...' : 'Generate Test Alerts'}
+        </button>
+      </div>
+
+      {successMessage && (
+        <div className="p-4 bg-green-900 text-green-200 rounded">
+          {successMessage}
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center py-8">Loading...</div>
@@ -104,6 +138,9 @@ export default function Containers() {
                       >
                         Quarantine
                       </button>
+                    )}
+                    {container.status === 'quarantined' && (
+                      <span className="text-red-400 text-xs font-semibold">Quarantined</span>
                     )}
                   </td>
                 </tr>
