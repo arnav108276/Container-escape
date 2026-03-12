@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../services/api";
 
 interface Alert {
@@ -14,440 +14,216 @@ interface Alert {
   acknowledged?: boolean;
 }
 
+interface AlertSummary {
+  open_alerts: number;
+  alerts_last_24h: number;
+  by_severity: Record<string, number>;
+  top_containers: Array<{ container_id: string; count: number }>;
+}
+
 export default function Alerts() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [summary, setSummary] = useState<AlertSummary | null>(null);
   const [loading, setLoading] = useState(false);
-  const [stats, setStats] = useState<{
-    total_alerts: number;
-    total_events: number;
-    alerts_by_container: any[];
-  } | null>(null);
+  const [includeAcknowledged, setIncludeAcknowledged] = useState(false);
   const [selectedAlerts, setSelectedAlerts] = useState<Set<string>>(new Set());
-  const [selectAll, setSelectAll] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const fetchAlerts = async () => {
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      const [alertsResponse, summaryResponse] = await Promise.all([
+        apiClient.getAlerts(undefined, 200, includeAcknowledged),
+        apiClient.getAlertSummary(),
+      ]);
+      setAlerts(alertsResponse.data.alerts || []);
+      setSummary(summaryResponse.data || null);
+      setSelectedAlerts(new Set());
+    } catch (error) {
+      console.error("Failed to fetch alerts:", error);
+      setErrorMessage("Failed to load alerts. Please verify backend connectivity.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchAlerts = async () => {
-      setLoading(true);
-
-      try {
-        const response = await apiClient.getAlerts();
-        setAlerts(response.data.alerts || []);
-        
-        // Fetch admin stats to show cleanup option
-        try {
-          const statsResponse = await apiClient.getAdminStats();
-          setStats(statsResponse.data);
-        } catch (e) {
-          console.log('Could not fetch admin stats');
-        }
-      } catch (error) {
-        console.error("Failed to fetch alerts:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchAlerts();
-
     const interval = setInterval(fetchAlerts, 5000);
-
     return () => clearInterval(interval);
-  }, []);
+  }, [includeAcknowledged]);
 
-  const getSeverityColor = (risk_category?: string) => {
-    const category = (risk_category || 'LOW').toUpperCase();
+  const selectAll = useMemo(
+    () => alerts.length > 0 && selectedAlerts.size === alerts.filter((a) => a._id).length,
+    [alerts, selectedAlerts],
+  );
 
-    if (category === 'CRITICAL')
-      return 'bg-red-950 text-red-200 border-red-600';
-
-    if (category === 'HIGH')
-      return 'bg-orange-950 text-orange-200 border-orange-600';
-
-    if (category === 'MEDIUM')
-      return 'bg-yellow-950 text-yellow-200 border-yellow-600';
-
-    return 'bg-green-950 text-green-200 border-green-600';
-  };
-
-  const handleSelectAlert = (alertId: string | undefined) => {
-    if (!alertId) return;
-    
-    const newSelected = new Set(selectedAlerts);
-    if (newSelected.has(alertId)) {
-      newSelected.delete(alertId);
-    } else {
-      newSelected.add(alertId);
+  const getSeverityColor = (category?: string) => {
+    switch ((category || "LOW").toUpperCase()) {
+      case "CRITICAL":
+        return "bg-red-950 text-red-200 border-red-600";
+      case "HIGH":
+        return "bg-orange-950 text-orange-200 border-orange-600";
+      case "MEDIUM":
+        return "bg-yellow-950 text-yellow-200 border-yellow-600";
+      default:
+        return "bg-green-950 text-green-200 border-green-600";
     }
-    setSelectedAlerts(newSelected);
-    
-    // Update selectAll checkbox state
-    setSelectAll(newSelected.size === alerts.length && alerts.length > 0);
   };
 
-  const handleSelectAll = () => {
+  const toggleAlert = (alertId?: string) => {
+    if (!alertId) return;
+    const next = new Set(selectedAlerts);
+    if (next.has(alertId)) next.delete(alertId);
+    else next.add(alertId);
+    setSelectedAlerts(next);
+  };
+
+  const toggleAll = () => {
     if (selectAll) {
       setSelectedAlerts(new Set());
-      setSelectAll(false);
-    } else {
-      const allIds = new Set(alerts.filter(a => a._id).map(a => a._id!));
-      setSelectedAlerts(allIds);
-      setSelectAll(true);
+      return;
     }
+    setSelectedAlerts(new Set(alerts.filter((a) => a._id).map((a) => a._id!)));
   };
 
-  const handleAcknowledgeSelected = async () => {
-    if (selectedAlerts.size === 0) {
-      alert('Please select alerts to acknowledge');
-      return;
-    }
-
-    if (!window.confirm(`Acknowledge ${selectedAlerts.size} selected alert(s)?`)) {
-      return;
-    }
-
+  const acknowledge = async (type: "single" | "selected" | "all", alertId?: string) => {
     setAcknowledging(true);
     try {
-      const alertIds = Array.from(selectedAlerts);
-      await apiClient.acknowledgeMultipleAlerts(alertIds);
-      
-      // Refresh alerts
-      const response = await apiClient.getAlerts();
-      setAlerts(response.data.alerts || []);
-      setSelectedAlerts(new Set());
-      setSelectAll(false);
-    } catch (error) {
-      alert('Failed to acknowledge alerts: ' + (error as any).message);
-    } finally {
-      setAcknowledging(false);
-    }
-  };
-
-  const handleAcknowledgeAll = async () => {
-    if (alerts.length === 0) {
-      alert('No alerts to acknowledge');
-      return;
-    }
-
-    if (!window.confirm(`Acknowledge all ${alerts.length} alert(s)?`)) {
-      return;
-    }
-
-    setAcknowledging(true);
-    try {
-      await apiClient.acknowledgeAllAlerts();
-      
-      // Refresh alerts
-      const response = await apiClient.getAlerts();
-      setAlerts(response.data.alerts || []);
-      setSelectedAlerts(new Set());
-      setSelectAll(false);
-    } catch (error) {
-      alert('Failed to acknowledge alerts: ' + (error as any).message);
-    } finally {
-      setAcknowledging(false);
-    }
-  };
-
-  const handleAcknowledgeSingle = async (alertId: string | undefined) => {
-    if (!alertId) return;
-
-    setAcknowledging(true);
-    try {
-      await apiClient.acknowledgeAlert(alertId);
-      
-      // Refresh alerts
-      const response = await apiClient.getAlerts();
-      setAlerts(response.data.alerts || []);
-      
-      // Remove from selection
-      const newSelected = new Set(selectedAlerts);
-      newSelected.delete(alertId);
-      setSelectedAlerts(newSelected);
-    } catch (error) {
-      alert('Failed to acknowledge alert: ' + (error as any).message);
-    } finally {
-      setAcknowledging(false);
-    }
-  };
-
-  const handleCleanupAll = async () => {
-    if (window.confirm('WARNING: This will delete ALL alerts and events from the database. This cannot be undone. Continue?')) {
-      try {
-        const response = await apiClient.cleanupAllData();
-        alert(`Cleanup complete:\n- Alerts deleted: ${response.data.alerts_deleted}\n- Events deleted: ${response.data.events_deleted}\n- Reports deleted: ${response.data.reports_deleted}`);
-        // Refresh alerts
-        const refreshResponse = await apiClient.getAlerts();
-        setAlerts(refreshResponse.data.alerts || []);
-      } catch (error) {
-        alert('Cleanup failed: ' + (error as any).message);
+      if (type === "single" && alertId) {
+        await apiClient.acknowledgeAlert(alertId);
+      } else if (type === "selected") {
+        await apiClient.acknowledgeMultipleAlerts(Array.from(selectedAlerts));
+      } else {
+        await apiClient.acknowledgeAllAlerts();
       }
-    }
-  };
-
-  const handleCleanupContainer = async (container_id: string) => {
-    if (window.confirm(`Delete all alerts and events for container ${container_id.slice(0, 12)}?`)) {
-      try {
-        const response = await apiClient.cleanupContainerAlerts(container_id);
-        alert(`Cleanup complete:\n- Alerts deleted: ${response.data.alerts_deleted}\n- Events deleted: ${response.data.events_deleted}`);
-        // Refresh alerts
-        const refreshResponse = await apiClient.getAlerts();
-        setAlerts(refreshResponse.data.alerts || []);
-      } catch (error) {
-        alert('Cleanup failed: ' + (error as any).message);
-      }
+      await fetchAlerts();
+    } catch (error: any) {
+      alert(`Failed to acknowledge alerts: ${error?.message || "unknown error"}`);
+    } finally {
+      setAcknowledging(false);
     }
   };
 
   return (
     <div className="space-y-8">
-
-      {/* Header */}
-      <div>
-        <h1 className="text-4xl font-bold text-white">
-          Security Alerts
-        </h1>
-
-        <p className="text-gray-400 mt-2">
-          Real-time alerts generated from container security events
-        </p>
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <h1 className="text-4xl font-bold">Security Alerts</h1>
+        <label className="inline-flex items-center gap-2 text-sm text-gray-300">
+          <input
+            type="checkbox"
+            checked={includeAcknowledged}
+            onChange={(e) => setIncludeAcknowledged(e.target.checked)}
+            className="h-4 w-4 rounded border-gray-600 bg-gray-700"
+          />
+          Show acknowledged alerts
+        </label>
       </div>
 
-      {/* Stats Bar */}
-      {stats && (
-        <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <p className="text-gray-400 text-xs">Total Alerts</p>
-              <p className="text-3xl font-bold text-white">{stats.total_alerts}</p>
-            </div>
-            <div>
-              <p className="text-gray-400 text-xs">Total Events</p>
-              <p className="text-3xl font-bold text-white">{stats.total_events}</p>
-            </div>
-            <div>
-              <p className="text-gray-400 text-xs">Containers with Alerts</p>
-              <p className="text-3xl font-bold text-white">{stats.alerts_by_container.length}</p>
-            </div>
+      {summary && (
+        <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+            <p className="text-xs uppercase text-gray-400">Open Alerts</p>
+            <p className="mt-1 text-2xl font-bold text-white">{summary.open_alerts}</p>
           </div>
-          
-          {/* Top containers by alert count */}
-          {stats.alerts_by_container.length > 0 && (
-            <div className="mt-4 border-t border-gray-700 pt-4">
-              <p className="text-gray-400 text-xs mb-2 font-semibold">Top Containers by Alert Count:</p>
-              <div className="space-y-1">
-                {stats.alerts_by_container.slice(0, 5).map((container, idx) => (
-                  <div key={idx} className="flex justify-between items-center text-xs">
-                    <span className="text-gray-300">{container.container_name || 'Unknown'}</span>
-                    <button
-                      onClick={() => handleCleanupContainer(container._id)}
-                      className="text-red-400 hover:text-red-300 text-xs"
-                    >
-                      Clean ({container.alert_count})
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Cleanup buttons */}
-          <div className="mt-4 border-t border-gray-700 pt-4 flex gap-2">
-            <button
-              onClick={handleCleanupAll}
-              className="px-3 py-1 bg-red-900 hover:bg-red-800 text-red-200 rounded text-xs font-semibold transition"
-            >
-              Clear All Data
-            </button>
-            <p className="text-gray-500 text-xs">
-              (Use if seeing old test alerts from before Docker cleanup)
-            </p>
+          <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+            <p className="text-xs uppercase text-gray-400">Alerts (24h)</p>
+            <p className="mt-1 text-2xl font-bold text-white">{summary.alerts_last_24h}</p>
           </div>
-        </div>
+          <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+            <p className="text-xs uppercase text-gray-400">Critical Open</p>
+            <p className="mt-1 text-2xl font-bold text-red-300">{summary.by_severity?.critical || 0}</p>
+          </div>
+          <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+            <p className="text-xs uppercase text-gray-400">High Open</p>
+            <p className="mt-1 text-2xl font-bold text-orange-300">{summary.by_severity?.high || 0}</p>
+          </div>
+        </section>
       )}
 
-      {/* Alerts Actions Bar */}
-      {alerts.length > 0 && (
-        <div className="bg-gray-800 rounded-xl p-4 border border-gray-700 space-y-3">
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              checked={selectAll && alerts.length > 0}
-              onChange={handleSelectAll}
-              className="w-4 h-4 rounded border-gray-600 bg-gray-700 cursor-pointer"
-              title="Select all alerts"
-            />
-            <span className="text-gray-300 text-sm">
-              {selectedAlerts.size > 0
-                ? `${selectedAlerts.size} selected`
-                : 'Select all'
-              }
-            </span>
+      {errorMessage && <div className="rounded-lg border border-red-700 bg-red-900/40 p-3 text-red-200">{errorMessage}</div>}
+
+      <section className="rounded-xl border border-gray-700 bg-gray-800 p-4">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => acknowledge("all")}
+            disabled={alerts.length === 0 || acknowledging}
+            className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:bg-gray-600"
+          >
+            {acknowledging ? "Processing..." : `Acknowledge All (${alerts.length})`}
+          </button>
+          <button
+            onClick={() => acknowledge("selected")}
+            disabled={selectedAlerts.size === 0 || acknowledging}
+            className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-gray-600"
+          >
+            {acknowledging ? "Processing..." : `Acknowledge Selected (${selectedAlerts.size})`}
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-10">
+            <div className="h-10 w-10 animate-spin rounded-full border-b-2 border-red-500" />
           </div>
-
-          <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={handleAcknowledgeAll}
-              disabled={alerts.length === 0 || acknowledging}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white rounded text-sm font-semibold transition"
-            >
-              {acknowledging ? 'Processing...' : `Acknowledge All (${alerts.length})`}
-            </button>
-            
-            <button
-              onClick={handleAcknowledgeSelected}
-              disabled={selectedAlerts.size === 0 || acknowledging}
-              className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded text-sm font-semibold transition"
-            >
-              {acknowledging ? 'Processing...' : `Acknowledge Selected (${selectedAlerts.size})`}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Loading */}
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500"></div>
-        </div>
-      ) : alerts.length === 0 ? (
-        <div className="text-center py-16 text-gray-400 text-lg">
-          No alerts detected. System is secure.
-        </div>
-      ) : (
-
-        <div className="space-y-4">
-
-          {alerts.map((alert: Alert, idx: number) => (
-
-            <div
-              key={`${alert.timestamp}-${idx}`}
-              className={`rounded-xl p-5 border-l-4 border-red-500 shadow hover:shadow-lg transition ${
-                selectedAlerts.has(alert._id || '')
-                  ? 'bg-gray-750 border-blue-500'
-                  : 'bg-gray-800'
-              }`}
-            >
-
-              {/* Checkbox and content */}
-              <div className="flex gap-3">
-                <input
-                  type="checkbox"
-                  checked={selectedAlerts.has(alert._id || '')}
-                  onChange={() => handleSelectAlert(alert._id)}
-                  className="w-5 h-5 rounded border-gray-600 bg-gray-700 cursor-pointer mt-1 flex-shrink-0"
-                  disabled={acknowledging}
-                />
-
-                <div className="flex-1">
-                  {/* Top section */}
-                  <div className="flex justify-between items-start mb-3">
-
-                    <div>
-                      <h3 className="font-bold text-lg text-white">
-                        {alert.container_name || alert.container_id || 'Unknown Container'}
-                      </h3>
-                      <p className="text-gray-400 text-xs mt-1">
-                        ID: {(alert.container_id || 'Unknown').slice(0, 12)}
-                        {alert.event_type && (
-                          <span className="ml-2 px-2 py-1 bg-gray-700 rounded text-xs">
-                            {alert.event_type}
-                          </span>
-                        )}
-                      </p>
+        ) : alerts.length === 0 ? (
+          <div className="py-8 text-center text-gray-400">No alerts available.</div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300">
+              <input
+                type="checkbox"
+                checked={selectAll}
+                onChange={toggleAll}
+                className="h-4 w-4 rounded border-gray-600 bg-gray-700"
+              />
+              Select all visible alerts
+            </div>
+            {alerts.map((alert, idx) => (
+              <article
+                key={`${alert._id || alert.timestamp}-${idx}`}
+                className={`rounded-lg border p-4 ${selectedAlerts.has(alert._id || "") ? "border-blue-500 bg-slate-900" : "border-gray-700 bg-gray-900"}`}
+              >
+                <div className="flex gap-3">
+                  <input
+                    type="checkbox"
+                    checked={selectedAlerts.has(alert._id || "")}
+                    onChange={() => toggleAlert(alert._id)}
+                    className="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-700"
+                  />
+                  <div className="flex-1">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <h3 className="text-lg font-semibold text-white">{alert.container_name || alert.container_id || "Unknown"}</h3>
+                        <p className="text-xs text-gray-400">Container: {(alert.container_id || "unknown").slice(0, 12)}</p>
+                        {alert.event_type && <p className="mt-1 text-xs text-blue-300">Event: {alert.event_type}</p>}
+                      </div>
+                      <span className={`rounded border px-3 py-1 text-xs font-bold ${getSeverityColor(alert.risk_category || alert.severity)}`}>
+                        {(alert.risk_category || alert.severity || "low").toUpperCase()}
+                      </span>
                     </div>
 
-                    <span
-                      className={`px-3 py-1 rounded text-xs font-bold border ${getSeverityColor(
-                        alert.risk_category
-                      )} flex-shrink-0`}
-                    >
-                      {alert.risk_category || alert.severity.toUpperCase()}
-                    </span>
+                    <p className="mt-3 rounded bg-gray-800 p-2 text-sm text-gray-200">{alert.reason}</p>
 
-                  </div>
-
-                  {/* Reason section */}
-                  <div className="mb-3 p-3 bg-gray-900 rounded border-l-2 border-red-500">
-                    <p className="text-sm text-gray-300">
-                      <span className="font-semibold text-white">Reason: </span>
-                      {alert.reason}
-                    </p>
-                  </div>
-
-                  {/* Bottom section with actions */}
-                  <div className="flex justify-between items-center text-sm text-gray-400">
-
-                    <span>
-                      Risk Score:
-                      <span className="ml-1 font-semibold text-white">
-                        {alert.risk_score}/100
-                      </span>
-                    </span>
-
-                    <div className="flex gap-2 items-center">
-                      <span className="text-xs">
-                        {new Date(alert.timestamp).toLocaleString()}
-                      </span>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-400">
+                      <span>Risk score: <strong className="text-white">{alert.risk_score}/100</strong></span>
+                      <span>{new Date(alert.timestamp).toLocaleString()}</span>
                       <button
-                        onClick={() => handleAcknowledgeSingle(alert._id)}
-                        disabled={acknowledging}
-                        className="px-2 py-1 bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 text-white rounded text-xs font-semibold transition whitespace-nowrap"
+                        onClick={() => acknowledge("single", alert._id)}
+                        disabled={acknowledging || !alert._id}
+                        className="rounded bg-yellow-600 px-3 py-1 font-semibold text-white hover:bg-yellow-700 disabled:bg-gray-600"
                       >
                         Dismiss
                       </button>
                     </div>
-
                   </div>
                 </div>
-              </div>
-
-            </div>
-
-          ))}
-
-        </div>
-      )}
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
-//         return 'bg-red-900 text-red-200';
-//       case 'HIGH':
-//         return 'bg-orange-900 text-orange-200';
-//       default:
-//         return 'bg-yellow-900 text-yellow-200';
-//     }
-//   };
-
-//   return (
-//     <div className="space-y-8">
-//       <h1 className="text-4xl font-bold">Security Alerts</h1>
-
-//       {loading ? (
-//         <div className="text-center py-8">Loading...</div>
-//       ) : alerts.length === 0 ? (
-//         <div className="text-center py-12 text-gray-400">No alerts</div>
-//       ) : (
-//         <div className="space-y-4">
-//           {alerts.map((alert: Alert, idx: number) => (
-//             <div key={idx} className="bg-gray-800 rounded-lg p-4 border-l-4 border-red-500">
-//               <div className="flex justify-between items-start mb-2">
-//                 <div>
-//                   <h3 className="font-bold text-lg">{alert.container_id}</h3>
-//                   <p className="text-gray-400 text-sm">{alert.reason}</p>
-//                 </div>
-//                 <span className={`px-3 py-1 rounded text-sm ${getSeverityColor(alert.severity)}`}>
-//                   {alert.severity}
-//                 </span>
-//               </div>
-//               <div className="flex justify-between items-center text-gray-500 text-sm">
-//                 <span>Risk Score: {alert.risk_score}/100</span>
-//                 <span>{new Date(alert.timestamp).toLocaleString()}</span>
-//               </div>
-//             </div>
-//           ))}
-//         </div>
-//       )}
-//     </div>
-//   );
-// }
