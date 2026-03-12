@@ -2,38 +2,37 @@
 FastAPI backend for Container Escape Detection System
 """
 
-from fastapi import FastAPI, WebSocket, HTTPException, Query, Request
-from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-import structlog
-import os
-from typing import List, Optional
 from datetime import datetime
+import os
+
+import structlog
+from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 
 from database import Database
-from models import Alert, SecurityEvent, Container, ForensicReport
-from routes import alerts, events, containers, reports, websocket, admin
+from routes import admin, alerts, containers, events, reports, websocket
 
 log = structlog.get_logger(__name__)
-
-# Store for WebSocket connections
-active_connections = []
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage app lifecycle - startup and shutdown"""
-    # Startup
+    """Manage app lifecycle - startup and shutdown."""
     log.info("Backend starting up")
+
     db = Database(os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
-    db.connect()
+    connected = db.connect()
+    if not connected:
+        log.warning("Backend started without an active MongoDB connection")
+
     app.state.db = db
-    
+    app.state.started_at = datetime.utcnow()
+
     yield
-    
-    # Shutdown
+
     log.info("Backend shutting down")
-    if hasattr(app.state, 'db'):
+    if hasattr(app.state, "db"):
         app.state.db.close()
 
 
@@ -41,10 +40,9 @@ app = FastAPI(
     title="Container Escape Detection API",
     description="Real-time container security monitoring",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
-# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -53,7 +51,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(alerts.router, prefix="/api", tags=["alerts"])
 app.include_router(events.router, prefix="/api", tags=["events"])
 app.include_router(containers.router, prefix="/api", tags=["containers"])
@@ -61,70 +58,121 @@ app.include_router(reports.router, prefix="/api", tags=["reports"])
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 
 
+def _get_database_status(db: Database) -> str:
+    """Check if the DB client is connected and reachable."""
+    try:
+        if not db.client:
+            return "disconnected"
+        db.client.admin.command("ping")
+        return "connected"
+    except Exception:
+        return "disconnected"
+
+
 @app.get("/api/dashboard/metrics")
 async def dashboard_metrics(request: Request):
-    """Get dashboard metrics for the security dashboard"""
+    """Get dashboard metrics for the security dashboard."""
+    db = request.app.state.db
+
     try:
-        db = request.app.state.db
-        
-        # Get container counts
-        containers = list(db.db.containers.find({}))
-        total_containers = len(containers)
-        quarantined_containers = sum(1 for c in containers if c.get('quarantined', False))
-        
-        # Get event counts (24 hours)
-        events = db.get_events(hours=24, limit=10000)
-        events_24h = len(events)
-        
-        # Count critical alerts
-        alerts = list(db.db.alerts.find({"severity": "critical"}))
-        critical_alerts = len(alerts)
-        
-        return {
-            'total_containers': total_containers,
-            'quarantined_containers': quarantined_containers,
-            'events_24h': events_24h,
-            'critical_alerts': critical_alerts
-        }
-    except Exception as e:
-        log.error("Failed to get dashboard metrics", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        metrics = db.get_dashboard_metrics()
+    except Exception as exc:
+        log.error("Failed to query dashboard metrics", error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to query dashboard metrics") from exc
+
+    if not metrics:
+        raise HTTPException(status_code=503, detail="Unable to query dashboard metrics")
+
+    return metrics
 
 
+@app.get("/api/system/overview")
+async def system_overview(request: Request):
+    """Aggregated status endpoint for enterprise dashboard experiences."""
+    db = request.app.state.db
+    db_status = _get_database_status(db)
 
+    metrics = db.get_dashboard_metrics() if db_status == "connected" else {}
+
+    alert_docs = []
+    event_docs = []
+    if db_status == "connected":
+        alert_docs = list(db.db.alerts.find({"acknowledged": False}).sort("timestamp", -1).limit(5))
+        event_docs = db.get_events(hours=1, limit=10)
+
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "service_status": "healthy" if db_status == "connected" else "degraded",
+        "database": db_status,
+        "uptime_seconds": round((datetime.utcnow() - request.app.state.started_at).total_seconds(), 2),
+        "metrics": metrics,
+        "high_priority_open_alerts": [
+            {
+                "container_id": a.get("container_id"),
+                "event_type": a.get("event_type"),
+                "severity": a.get("severity"),
+                "risk_score": a.get("risk_score"),
+                "timestamp": a.get("timestamp").isoformat() if hasattr(a.get("timestamp"), "isoformat") else a.get("timestamp"),
+            }
+            for a in alert_docs
+        ],
+        "events_last_hour": len(event_docs),
+    }
 
 
 @app.websocket("/ws/events")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time event streaming"""
-    await websocket.accept()
-    active_connections.append(websocket)
+async def websocket_endpoint(ws: WebSocket):
+    """WebSocket endpoint for real-time event streaming."""
+    await websocket.manager.connect(ws)
     try:
         while True:
-            data = await websocket.receive_text()
-            # Echo events to all connected clients
-            for connection in active_connections:
-                try:
-                    await connection.send_text(data)
-                except:
-                    pass
-    except:
-        active_connections.remove(websocket)
+            payload = await ws.receive_json()
+            await websocket.manager.broadcast(
+                {
+                    "type": "event",
+                    "data": payload,
+                    "received_at": datetime.utcnow().isoformat(),
+                }
+            )
+    except Exception as exc:
+        log.warning("WebSocket connection closed", error=str(exc))
+    finally:
+        try:
+            websocket.manager.disconnect(ws)
+        except ValueError:
+            pass
 
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint"""
+async def health_check(request: Request):
+    """Liveness endpoint."""
+    db_status = _get_database_status(request.app.state.db)
     return {
-        "status": "healthy",
+        "status": "healthy" if db_status == "connected" else "degraded",
         "timestamp": datetime.utcnow().isoformat(),
-        "service": "container-escape-detection-backend"
+        "service": "container-escape-detection-backend",
+        "database": db_status,
+    }
+
+
+@app.get("/ready")
+async def readiness_check(request: Request):
+    """Readiness endpoint used by orchestrators before sending traffic."""
+    db = request.app.state.db
+    if _get_database_status(db) != "connected":
+        raise HTTPException(status_code=503, detail="Database is not reachable")
+
+    uptime_seconds = (datetime.utcnow() - request.app.state.started_at).total_seconds()
+    return {
+        "status": "ready",
+        "uptime_seconds": round(uptime_seconds, 2),
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
 
 @app.get("/")
 async def root():
-    """Root endpoint"""
+    """Root endpoint."""
     return {
         "name": "Container Escape Detection API",
         "version": "1.0.0",
@@ -133,18 +181,21 @@ async def root():
             "events": "/api/events",
             "containers": "/api/containers",
             "reports": "/api/reports",
+            "system_overview": "/api/system/overview",
             "websocket": "/ws/events",
-            "health": "/health"
-        }
+            "health": "/health",
+            "ready": "/ready",
+        },
     }
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8000,
         reload=True,
-        log_level="info"
+        log_level="info",
     )
