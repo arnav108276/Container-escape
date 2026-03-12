@@ -19,9 +19,6 @@ export const apiClient = {
   getAlerts: (containerId?: string, limit: number = 100) =>
     api.get('/api/alerts', { params: { container_id: containerId, limit } }),
   
-  generateTestAlerts: () =>
-    api.post('/api/alerts/test/generate'),
-  
   // Events
   getEvents: (containerId?: string, hours: number = 24, limit: number = 1000) =>
     api.get('/api/events', { params: { container_id: containerId, hours, limit } }),

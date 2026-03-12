@@ -81,6 +81,7 @@ class EventDaemon:
         self.backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
         self.mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
+        self.quarantine_threshold = 75  # Risk score threshold for auto-quarantine
         
         # Initialize components
         self.event_processor = EventProcessor()
@@ -91,7 +92,7 @@ class EventDaemon:
         self.http_client = httpx.Client(timeout=10.0)
         self.running = False
         
-        log.info("Daemon initialized", backend_url=self.backend_url)
+        log.info("Daemon initialized", backend_url=self.backend_url, quarantine_threshold=self.quarantine_threshold)
 
     def process_event(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -129,41 +130,77 @@ class EventDaemon:
             
             # Step 3: Calculate risk score
             enriched['risk_score'] = self.risk_scorer.calculate(enriched)
+            enriched['risk_category'] = self._categorize_risk(enriched['risk_score'])
             
             # Step 4: Log forensic data
             self.forensic_logger.log_event(enriched)
             
             # Step 5-7: Determine response based on risk level
-            # Critical/High risk threshold: >= 75
+            # CRITICAL risk: >= 75 (Auto-quarantine)
             if enriched['risk_score'] >= 75:
                 log.warning(
-                    "Critical event detected - initiating response",
+                    "CRITICAL EVENT DETECTED - AUTO-QUARANTINE INITIATED",
                     container_id=sec_event.container_id,
                     risk_score=enriched['risk_score'],
-                    event_type=sec_event.event_type
+                    risk_category="CRITICAL",
+                    event_type=sec_event.event_type,
+                    reason=enriched.get('description', 'Critical container escape attempt')
                 )
                 
-                # Quarantine container
+                # Quarantine container immediately
                 self.container_manager.quarantine(sec_event.container_id)
                 
                 # Send alert to backend
                 self._send_alert(enriched)
             
-            # Medium risk threshold: 50-74
+            # HIGH risk: 50-74 (Alert only)
             elif enriched['risk_score'] >= 50:
                 log.warning(
-                    "Medium risk event detected",
+                    "HIGH RISK EVENT DETECTED",
                     container_id=sec_event.container_id,
-                    risk_score=enriched['risk_score']
+                    risk_score=enriched['risk_score'],
+                    risk_category="HIGH",
+                    event_type=sec_event.event_type
                 )
-                # Send to backend for monitoring but don't quarantine
+                # Send to backend for monitoring but don't auto-quarantine
                 self._send_alert(enriched)
+            
+            # MEDIUM risk: 40-49 (Log and monitor)
+            elif enriched['risk_score'] >= 40:
+                log.info(
+                    "MEDIUM RISK EVENT DETECTED",
+                    container_id=sec_event.container_id,
+                    risk_score=enriched['risk_score'],
+                    risk_category="MEDIUM",
+                    event_type=sec_event.event_type
+                )
+            
+            # LOW risk: < 40 (Forensic log only)
+            else:
+                log.debug(
+                    "LOW RISK EVENT",
+                    container_id=sec_event.container_id,
+                    risk_score=enriched['risk_score'],
+                    risk_category="LOW",
+                    event_type=sec_event.event_type
+                )
             
             return enriched
             
         except Exception as e:
             log.error("Error processing event", error=str(e), exc_info=True)
             return None
+
+    def _categorize_risk(self, score: int) -> str:
+        """Categorize risk score into severity levels"""
+        if score >= 75:
+            return "CRITICAL"
+        elif score >= 50:
+            return "HIGH"
+        elif score >= 40:
+            return "MEDIUM"
+        else:
+            return "LOW"
 
     def _send_alert(self, event: Dict[str, Any]) -> bool:
         """
@@ -181,14 +218,19 @@ class EventDaemon:
                     event['timestamp_ns'] / 1e9
                 ).isoformat(),
                 "container_id": event['container_id'],
+                "container_name": event.get('container_name', 'unknown'),
                 "reason": event.get('description', 'Container escape attempt detected'),
                 "risk_score": event['risk_score'],
+                "risk_category": event.get('risk_category', 'UNKNOWN'),
                 "event_type": event.get('event_type', 'unknown'),
+                "severity": "critical" if event['risk_score'] >= 75 else "high" if event['risk_score'] >= 50 else "medium",
                 "metadata": {
                     "filepath": event.get('filepath'),
                     "pid": event.get('pid'),
                     "uid": event.get('uid'),
-                    "syscall_nr": event.get('syscall_nr')
+                    "gid": event.get('gid'),
+                    "syscall_nr": event.get('syscall_nr'),
+                    "syscall_name": event.get('syscall_name')
                 }
             }
             
@@ -203,7 +245,8 @@ class EventDaemon:
             log.info(
                 "Alert sent to backend",
                 status_code=response.status_code,
-                container_id=event['container_id']
+                container_id=event['container_id'],
+                risk_category=event.get('risk_category')
             )
             return response.status_code in [200, 201]
             

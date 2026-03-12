@@ -22,8 +22,10 @@ class Alert(BaseModel):
     """Security alert for high-risk events"""
     timestamp: datetime
     container_id: str
+    container_name: Optional[str] = None
     reason: str
     risk_score: int
+    risk_category: Optional[str] = "UNKNOWN"  # CRITICAL, HIGH, MEDIUM, LOW
     severity: str = "HIGH"
     metadata: Dict[str, Any] = {}
 

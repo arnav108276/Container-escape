@@ -90,52 +90,7 @@ async def dashboard_metrics(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/alerts/test/generate")
-async def generate_test_alerts(request: Request):
-    """
-    Generate test alerts for demonstration and testing
-    This endpoint creates sample high-risk alerts for containers
-    """
-    try:
-        db = request.app.state.db
-        
-        # Get containers
-        containers = list(db.db.containers.find({}))
-        if not containers:
-            raise HTTPException(status_code=400, detail="No containers found. Please sync containers first.")
-        
-        test_alerts = []
-        for i, container in enumerate(containers):
-            # Create high-risk alert for first container
-            risk_score = 85 + i * 5  # CRITICAL risk
-            
-            alert_doc = {
-                'timestamp': datetime.utcnow(),
-                'container_id': container.get('container_id'),
-                'reason': f'Suspicious process execution detected in container',
-                'risk_score': min(risk_score, 100),
-                'severity': 'critical' if risk_score >= 80 else 'high',
-                'metadata': {
-                    'filepath': '/etc/shadow' if i % 2 == 0 else '/proc/sys/kernel/modules',
-                    'pid': 1234 + i,
-                    'uid': 0,
-                    'syscall_nr': 105
-                }
-            }
-            
-            db.db.alerts.insert_one(alert_doc)
-            test_alerts.append(alert_doc)
-        
-        log.info("Test alerts generated", count=len(test_alerts))
-        
-        return {
-            'status': 'success',
-            'message': f'Generated {len(test_alerts)} test alerts',
-            'alerts_created': len(test_alerts)
-        }
-    except Exception as e:
-        log.error("Failed to generate test alerts", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.websocket("/ws/events")

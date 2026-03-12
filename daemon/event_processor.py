@@ -98,16 +98,37 @@ class EventProcessor:
         return {"container_id": container_id, "status": "unavailable"}
     
     def _get_event_description(self, enriched: Dict[str, Any]) -> str:
-        """Generate human-readable event description"""
+        """Generate human-readable event description with risk details"""
         event_type = enriched['event_type']
+        filepath = enriched.get('filepath', 'unknown')
+        pid = enriched.get('pid', 'unknown')
+        syscall_name = enriched.get('syscall_name', 'syscall')
+        uid = enriched.get('uid', 'unknown')
         
-        if event_type == "PRIVILEGE_ESCALATION":
-            return f"Process {enriched['pid']} attempted to escalate privileges via {enriched['syscall_name']}"
-        elif event_type == "UNAUTHORIZED_FILE_ACCESS":
-            return f"Unauthorized access to {enriched['filepath']} from container {enriched['container_id']}"
-        elif event_type == "MOUNT_ATTEMPT":
-            return f"Mount attempt on {enriched['filepath']} in container {enriched['container_id']}"
-        elif event_type == "EXEC":
-            return f"Process execution: {enriched['filepath']}"
-        else:
-            return f"{event_type} detected in container {enriched['container_id']}"
+        descriptions = {
+            "PRIVILEGE_ESCALATION": (
+                f"Privilege escalation attempt via {syscall_name}: "
+                f"PID {pid} (UID {uid}) attempting to change effective user/group ID. "
+                f"Possible container escape via privilege escalation."
+            ),
+            "UNAUTHORIZED_FILE_ACCESS": (
+                f"Unauthorized access to sensitive file: {filepath}. "
+                f"PID {pid} is accessing restricted system files that should not be accessible from within a container."
+            ),
+            "MOUNT_ATTEMPT": (
+                f"Mount system call detected: attempting to mount {filepath}. "
+                f"CRITICAL: Container escape via filesystem manipulation. Mount operations can expose host filesystem."
+            ),
+            "CAPABILITY_CHANGE": (
+                f"Linux capability modification via {syscall_name}: "
+                f"PID {pid} attempting to add/modify capabilities. "
+                f"Could enable privilege escalation or mount operations."
+            ),
+            "EXEC": (
+                f"Suspicious process execution: {filepath} spawned by PID {pid}. "
+                f"Possible malicious process or escape attempt."
+            ),
+        }
+        
+        return descriptions.get(event_type, 
+            f"{event_type} detected in container: {filepath} via {syscall_name}")

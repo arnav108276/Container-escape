@@ -62,10 +62,14 @@ def _calculate_container_risk(db, container_id: str) -> tuple[str, int]:
         if scores:
             avg_risk = sum(scores) / len(scores)
             
-            # Determine risk level
-            if avg_risk >= 80:
+            # Determine risk level based on categorization
+            # CRITICAL: >= 75 (Auto-quarantine threshold)
+            # HIGH: 50-74 (Alert and monitor)
+            # MEDIUM: 40-49 (Log and monitor)
+            # LOW: < 40 (Forensic log only)
+            if avg_risk >= 75:
                 risk_level = 'CRITICAL'
-            elif avg_risk >= 60:
+            elif avg_risk >= 50:
                 risk_level = 'HIGH'
             elif avg_risk >= 40:
                 risk_level = 'MEDIUM'
@@ -191,44 +195,68 @@ async def get_container_status(container_id: str, request: Request):
 @router.post("/containers/{container_id}/quarantine")
 async def quarantine_container(
     container_id: str,
-    req: Request,
-    body: QuarantineRequest = Body(...)
+    req: Request
 ):
-    """Quarantine a container"""
+    """Quarantine a container - pause and isolate it"""
     try:
+        # Parse request body
+        try:
+            body = await req.json()
+            reason = body.get('reason', 'Manual quarantine')
+            approved_by = body.get('approved_by', 'admin')
+        except Exception:
+            reason = 'Manual quarantine'
+            approved_by = 'admin'
+        
         db = req.app.state.db
         
-        # Update container status to quarantined
-        db.db.containers.update_one(
+        # Get the container manager instance from app state or create one
+        if not hasattr(req.app.state, 'container_manager'):
+            from daemon.container_manager import ContainerManager
+            req.app.state.container_manager = ContainerManager()
+        
+        container_manager = req.app.state.container_manager
+        
+        # Actually pause and isolate the container
+        quarantine_success = container_manager.quarantine(container_id)
+        
+        # Update database status
+        result = db.db.containers.update_one(
             {'container_id': container_id},
             {
                 '$set': {
                     'status': 'quarantined',
                     'quarantined': True,
-                    'updated_at': datetime.utcnow()
+                    'updated_at': datetime.utcnow(),
+                    'quarantine_reason': reason,
+                    'quarantined_by': approved_by,
+                    'quarantined_at': datetime.utcnow()
                 }
             },
             upsert=True
         )
         
-        # Log action
         log.warning(
             "Container quarantined",
             container_id=container_id,
-            reason=body.reason,
-            approved_by=body.approved_by
+            reason=reason,
+            approved_by=approved_by,
+            action_success=quarantine_success,
+            matched_count=result.matched_count
         )
         
         return {
             'status': 'success',
             'container_id': container_id,
             'quarantine_status': 'quarantined',
-            'reason': body.reason,
-            'approved_by': body.approved_by
+            'paused': quarantine_success,
+            'reason': reason,
+            'approved_by': approved_by,
+            'message': 'Container paused and isolated successfully' if quarantine_success else 'Container marked as quarantined (pause may have failed)'
         }
     except Exception as e:
-        log.error("Failed to quarantine container", error=str(e), container_id=container_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        log.error("Failed to quarantine container", error=str(e), container_id=container_id, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to quarantine: {str(e)}")
 
 
 @router.post("/containers/{container_id}/unquarantine")
@@ -237,18 +265,30 @@ async def unquarantine_container(
     approved_by: str,
     req: Request
 ):
-    """Restore a quarantined container"""
+    """Restore a quarantined container - unpause and reconnect"""
     try:
         db = req.app.state.db
         
+        # Get the container manager instance
+        if not hasattr(req.app.state, 'container_manager'):
+            from daemon.container_manager import ContainerManager
+            req.app.state.container_manager = ContainerManager()
+        
+        container_manager = req.app.state.container_manager
+        
+        # Actually unpause the container
+        unquarantine_success = container_manager.unquarantine(container_id)
+        
         # Update container status
-        db.db.containers.update_one(
+        result = db.db.containers.update_one(
             {'container_id': container_id},
             {
                 '$set': {
                     'status': 'running',
                     'quarantined': False,
-                    'updated_at': datetime.utcnow()
+                    'updated_at': datetime.utcnow(),
+                    'unquarantined_by': approved_by,
+                    'unquarantined_at': datetime.utcnow()
                 }
             }
         )
@@ -256,17 +296,20 @@ async def unquarantine_container(
         log.info(
             "Container unquarantined",
             container_id=container_id,
-            approved_by=approved_by
+            approved_by=approved_by,
+            action_success=unquarantine_success
         )
         
         return {
             'status': 'success',
             'container_id': container_id,
-            'quarantine_status': 'unquarantined'
+            'quarantine_status': 'unquarantined',
+            'unpaused': unquarantine_success,
+            'message': 'Container unpaused and restored successfully' if unquarantine_success else 'Container marked as active (unpause may have failed)'
         }
     except Exception as e:
-        log.error("Failed to unquarantine container", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        log.error("Failed to unquarantine container", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to unquarantine: {str(e)}")
 
 
 @router.get("/containers/{container_id}/risk")

@@ -39,13 +39,34 @@ async def create_alert(alert: Alert, request: Request):
             risk_score=alert.risk_score
         )
         
+        # Lookup container name from containers collection
+        container = db.db.containers.find_one({'container_id': alert.container_id})
+        container_name = container.get('name') if container else 'Unknown'
+        
+        # Determine severity and category
+        risk_score = alert.risk_score
+        if risk_score >= 75:
+            severity = 'critical'
+            risk_category = 'CRITICAL'
+        elif risk_score >= 50:
+            severity = 'high'
+            risk_category = 'HIGH'
+        elif risk_score >= 40:
+            severity = 'medium'
+            risk_category = 'MEDIUM'
+        else:
+            severity = 'low'
+            risk_category = 'LOW'
+        
         # Insert into database
         db.insert_alert({
             'timestamp': alert.timestamp,
             'container_id': alert.container_id,
+            'container_name': container_name,
             'reason': alert.reason,
             'risk_score': alert.risk_score,
-            'severity': alert.severity,
+            'risk_category': alert.risk_category or risk_category,
+            'severity': alert.severity or severity,
             'metadata': alert.metadata
         })
         

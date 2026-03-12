@@ -4,8 +4,10 @@ import { apiClient } from "../services/api";
 interface Alert {
   timestamp: string;
   container_id: string;
+  container_name?: string;
   reason: string;
   risk_score: number;
+  risk_category?: string;
   severity: string;
 }
 
@@ -34,19 +36,19 @@ export default function Alerts() {
     return () => clearInterval(interval);
   }, []);
 
-  const getSeverityColor = (severity: string) => {
-    const level = severity.toLowerCase();
+  const getSeverityColor = (risk_category?: string) => {
+    const category = (risk_category || 'LOW').toUpperCase();
 
-    if (level === "critical")
-      return "bg-red-900 text-red-300 border-red-500";
+    if (category === 'CRITICAL')
+      return 'bg-red-950 text-red-200 border-red-600';
 
-    if (level === "high")
-      return "bg-orange-900 text-orange-300 border-orange-500";
+    if (category === 'HIGH')
+      return 'bg-orange-950 text-orange-200 border-orange-600';
 
-    if (level === "medium")
-      return "bg-yellow-900 text-yellow-300 border-yellow-500";
+    if (category === 'MEDIUM')
+      return 'bg-yellow-950 text-yellow-200 border-yellow-600';
 
-    return "bg-green-900 text-green-300 border-green-500";
+    return 'bg-green-950 text-green-200 border-green-600';
   };
 
   return (
@@ -88,22 +90,29 @@ export default function Alerts() {
 
                 <div>
                   <h3 className="font-bold text-lg text-white">
-                    {alert.container_id}
+                    {alert.container_name || alert.container_id}
                   </h3>
-
-                  <p className="text-gray-400 text-sm mt-1">
-                    {alert.reason}
+                  <p className="text-gray-400 text-xs mt-1">
+                    ID: {alert.container_id.slice(0, 12)}
                   </p>
                 </div>
 
                 <span
                   className={`px-3 py-1 rounded text-xs font-bold border ${getSeverityColor(
-                    alert.severity
+                    alert.risk_category
                   )}`}
                 >
-                  {alert.severity}
+                  {alert.risk_category || alert.severity.toUpperCase()}
                 </span>
 
+              </div>
+
+              {/* Reason section */}
+              <div className="mb-3 p-3 bg-gray-900 rounded border-l-2 border-red-500">
+                <p className="text-sm text-gray-300">
+                  <span className="font-semibold text-white">Reason: </span>
+                  {alert.reason}
+                </p>
               </div>
 
               {/* Bottom section */}
