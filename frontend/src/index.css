@@ -19,3 +19,25 @@ a {
 button {
   @apply font-medium;
 }
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background: #0f172a;
+  color: white;
+  font-family: Inter, sans-serif;
+}
+
+.card {
+  @apply bg-slate-900 border border-slate-700 rounded-xl p-5 shadow-lg;
+}
+
+.title {
+  @apply text-xl font-semibold mb-3;
+}
+
+.badge {
+  @apply px-2 py-1 rounded text-xs font-bold;
+}

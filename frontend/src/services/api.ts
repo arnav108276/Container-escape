@@ -47,8 +47,8 @@ export const apiClient = {
     api.post('/api/reports/generate', null, { params: { container_id: containerId, hours } }),
   
   // Dashboard
-  getDashboardMetrics: () =>
-    api.get('/api/dashboard'),
+  // getDashboardMetrics: () =>
+  //   api.get('/api/dashboard'),
   
   // Health
   health: () =>
