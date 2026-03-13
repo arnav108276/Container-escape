@@ -20,11 +20,14 @@ def _to_json_serializable(doc):
     if isinstance(doc, list):
         return [_to_json_serializable(item) for item in doc]
     if isinstance(doc, dict):
-        return {
+        serialized = {
             k: str(v) if isinstance(v, ObjectId) else v.isoformat() if hasattr(v, "isoformat") else _to_json_serializable(v)
             for k, v in doc.items()
             if k != "_id"
         }
+        if doc.get("_id") is not None:
+            serialized["alert_id"] = str(doc["_id"])
+        return serialized
     return doc
 
 
