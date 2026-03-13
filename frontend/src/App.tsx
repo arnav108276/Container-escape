@@ -50,7 +50,7 @@ function App() {
 
   return (
     <Router>
-      <div className="flex min-h-screen bg-slate-950 text-gray-200">
+      <div className="flex min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-gray-200">
 
         {/* Sidebar */}
         <Sidebar />
@@ -63,8 +63,8 @@ function App() {
 
           {/* Connection Banner */}
           <div
-            className={`text-center py-2 text-sm ${
-              isConnected ? "bg-green-600" : "bg-red-600"
+            className={`text-center py-2 text-sm font-medium ${
+              isConnected ? "bg-emerald-700/80 text-emerald-100" : "bg-rose-700/80 text-rose-100"
             }`}
           >
             {isConnected

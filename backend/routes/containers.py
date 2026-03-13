@@ -289,8 +289,19 @@ async def quarantine_container(
 
         # Actually pause and isolate the container when runtime manager is available
         quarantine_success = container_manager.quarantine(canonical_container_id) if container_manager else False
-        
-        # Update database status
+        if not quarantine_success:
+            log.error(
+                "Container quarantine failed",
+                container_id=canonical_container_id,
+                reason=reason,
+                approved_by=approved_by,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Failed to pause container runtime. Quarantine was not applied.",
+            )
+
+        # Update database status only after successful runtime pause
         result = db.db.containers.update_one(
             {'container_id': canonical_container_id},
             {
@@ -305,7 +316,7 @@ async def quarantine_container(
             },
             upsert=True
         )
-        
+
         log.warning(
             "Container quarantined",
             container_id=container_id,
@@ -314,16 +325,18 @@ async def quarantine_container(
             action_success=quarantine_success,
             matched_count=result.matched_count
         )
-        
+
         return {
             'status': 'success',
             'container_id': canonical_container_id,
             'quarantine_status': 'quarantined',
-            'paused': quarantine_success,
+            'paused': True,
             'reason': reason,
             'approved_by': approved_by,
-            'message': 'Container paused and isolated successfully' if quarantine_success else 'Container marked as quarantined (runtime action unavailable or failed)'
+            'message': 'Container paused and isolated successfully'
         }
+    except HTTPException:
+        raise
     except Exception as e:
         log.error("Failed to quarantine container", error=str(e), container_id=container_id, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to quarantine: {str(e)}")

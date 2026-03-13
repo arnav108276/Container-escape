@@ -215,10 +215,13 @@ class ContainerManager:
             return True
         
         try:
-            # Pause container
-            self._pause_container(container_id)
-            
-            # Disconnect network
+            # Pause container (hard requirement for quarantine)
+            paused = self._pause_container(container_id)
+            if not paused:
+                log.error("Quarantine failed: unable to pause container", container_id=container_id)
+                return False
+
+            # Disconnect network (best effort; pause already blocks execution)
             self._disconnect_network(container_id)
             
             # Add to quarantined set
@@ -241,16 +244,30 @@ class ContainerManager:
     
     def _pause_container(self, container_id: str) -> bool:
         """Pause a Docker container"""
-        if not self.docker_client:
-            return False
-        
+        if self.docker_client:
+            try:
+                container = self.docker_client.containers.get(container_id)
+                container.pause()
+                log.info("Container paused", container_id=container_id, method="docker_sdk")
+                return True
+            except Exception as e:
+                log.warning("Could not pause container via SDK", error=str(e), container_id=container_id)
+
+        # CLI fallback for environments where SDK is unavailable
         try:
-            container = self.docker_client.containers.get(container_id)
-            container.pause()
-            log.info("Container paused", container_id=container_id)
-            return True
+            result = subprocess.run(
+                ["docker", "pause", container_id],
+                capture_output=True,
+                text=True,
+                timeout=8,
+            )
+            if result.returncode == 0:
+                log.info("Container paused", container_id=container_id, method="docker_cli")
+                return True
+            log.error("Could not pause container via CLI", container_id=container_id, stderr=result.stderr.strip())
+            return False
         except Exception as e:
-            log.error("Could not pause container", error=str(e))
+            log.error("Could not pause container", error=str(e), container_id=container_id)
             return False
     
     def _disconnect_network(self, container_id: str) -> bool:
