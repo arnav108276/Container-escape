@@ -76,22 +76,25 @@ class ContainerManager:
             
             if result.returncode == 0:
                 containers = []
+                inspect_cache: Dict[str, Dict] = {}
                 for line in result.stdout.strip().split('\n'):
                     if not line:
                         continue
                     try:
                         container_data = json.loads(line)
+                        full_id = container_data.get('ID', '')
+                        baseline_score, findings = self._assess_runtime_risk_from_cli(full_id, inspect_cache)
                         containers.append({
-                            'container_id': container_data.get('ID', '')[:12],
-                            'full_id': container_data.get('ID', ''),
+                            'container_id': full_id[:12],
+                            'full_id': full_id,
                             'name': container_data.get('Names', ''),
                             'image': container_data.get('Image', ''),
                             'status': 'running',
                             'quarantined': False,
-                            'risk_level': 'LOW',
-                            'risk_score': 0,
+                            'risk_level': self._score_to_level(baseline_score),
+                            'risk_score': baseline_score,
                             'alert_count': 0,
-                            'runtime_findings': []
+                            'runtime_findings': findings,
                         })
                     except json.JSONDecodeError:
                         continue
@@ -108,13 +111,52 @@ class ContainerManager:
         log.info("No containers discovered - use API endpoint or script to populate", os=self.os_type)
         return []
 
+    def _assess_runtime_risk_from_cli(self, container_id: str, inspect_cache: Dict[str, Dict]) -> tuple[int, List[str]]:
+        """Compute runtime risk score when Docker SDK is unavailable using `docker inspect`."""
+        if not container_id:
+            return (0, [])
+
+        inspect_data = inspect_cache.get(container_id)
+        if inspect_data is None:
+            inspect_data = self._inspect_container(container_id)
+            inspect_cache[container_id] = inspect_data
+
+        if not inspect_data:
+            return (0, [])
+
+        host_config = inspect_data.get("HostConfig", {})
+        return self._score_host_config(host_config)
+
+    def _inspect_container(self, container_id: str) -> Dict:
+        """Return parsed docker inspect payload for one container."""
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", container_id],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return {}
+
+            payload = json.loads(result.stdout)
+            if isinstance(payload, list) and payload:
+                return payload[0]
+            return {}
+        except Exception:
+            return {}
+
     def _assess_runtime_risk(self, container) -> tuple[int, List[str]]:
         """Compute a baseline runtime risk score from container configuration."""
-        score = 0
-        findings: List[str] = []
-
         attrs = container.attrs or {}
         host_config = attrs.get("HostConfig", {})
+
+        return self._score_host_config(host_config)
+
+    def _score_host_config(self, host_config: Dict) -> tuple[int, List[str]]:
+        """Score risky runtime options from Docker HostConfig."""
+        score = 0
+        findings: List[str] = []
 
         if host_config.get("Privileged"):
             score += 55
@@ -123,6 +165,10 @@ class ContainerManager:
         if host_config.get("PidMode") == "host":
             score += 25
             findings.append("Container shares host PID namespace")
+
+        if host_config.get("NetworkMode") == "host":
+            score += 20
+            findings.append("Container shares host network namespace")
 
         binds = host_config.get("Binds") or []
         if any(str(bind).startswith("/:") or str(bind).startswith("/:/") for bind in binds):
@@ -138,6 +184,10 @@ class ContainerManager:
         if any(opt in {"seccomp=unconfined", "apparmor=unconfined", "label=disable"} for opt in security_opt):
             score += 15
             findings.append("Container security profile is unconfined")
+
+        if host_config.get("IpcMode") == "host":
+            score += 10
+            findings.append("Container shares host IPC namespace")
 
         return min(score, 100), findings
 
