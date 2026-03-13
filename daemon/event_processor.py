@@ -34,11 +34,15 @@ class EventProcessor:
             ]
         }
         
+        # Resolve container ID from PID if kernel program provided placeholder
+        if not enriched['container_id'] or enriched['container_id'] == 'unknown':
+            enriched['container_id'] = self._resolve_container_id_from_pid(event.pid)
+
         # Get process details
         enriched['process_info'] = self._get_process_info(event.pid)
         
         # Get container details
-        enriched['container_info'] = self._get_container_info(event.container_id)
+        enriched['container_info'] = self._get_container_info(enriched['container_id'])
         
         # Determine event description
         enriched['description'] = self._get_event_description(enriched)
@@ -52,7 +56,8 @@ class EventProcessor:
             2: "UNAUTHORIZED_FILE_ACCESS",
             3: "MOUNT_ATTEMPT",
             4: "EXEC",
-            5: "CAPABILITY_CHANGE"
+            5: "CAPABILITY_CHANGE",
+            6: "PROCESS_TRACING"
         }
         return event_types.get(event_type, "UNKNOWN")
     
@@ -84,6 +89,24 @@ class EventProcessor:
         except:
             return {"pid": pid, "status": "unavailable"}
     
+
+    def _resolve_container_id_from_pid(self, pid: int) -> str:
+        """Best-effort extraction of container ID from /proc/<pid>/cgroup."""
+        try:
+            with open(f"/proc/{pid}/cgroup", "r") as f:
+                for line in f:
+                    cgroup_path = line.strip().split(":", 2)[-1]
+                    tokens = [token for token in cgroup_path.replace('.scope', '').split('/') if token]
+                    for token in reversed(tokens):
+                        if token.startswith('docker-') and len(token) > 20:
+                            return token.replace('docker-', '')[:12]
+                        if len(token) >= 12 and all(ch in '0123456789abcdef' for ch in token[:12].lower()):
+                            return token[:12]
+        except Exception:
+            pass
+
+        return "unknown"
+
     def _get_container_info(self, container_id: str) -> Dict[str, Any]:
         """Get container metadata from Docker/Kubernetes"""
         try:
@@ -123,6 +146,11 @@ class EventProcessor:
                 f"Linux capability modification via {syscall_name}: "
                 f"PID {pid} attempting to add/modify capabilities. "
                 f"Could enable privilege escalation or mount operations."
+            ),
+            "PROCESS_TRACING": (
+                f"Process tracing attempt detected via {syscall_name}: "
+                f"PID {pid} attempted to inspect/control another process. "
+                f"This can be used to tamper with host or peer container processes."
             ),
             "EXEC": (
                 f"Suspicious process execution: {filepath} spawned by PID {pid}. "

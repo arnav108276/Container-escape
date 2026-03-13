@@ -360,13 +360,34 @@ Dashboard → Containers → [Quarantine] button
 
 ## 🔍 Troubleshooting
 
-### Issue: Alerts not appearing
+### Issue: Alerts not appearing / Risk always LOW
 
 **Causes & Fixes:**
 - ❌ eBPF program not loaded → Check kernel version (≥5.8)
 - ❌ Daemon not running → `docker-compose logs daemon`
 - ❌ Container not detected → Run sync script to populate
 - ❌ Events not reaching backend → Check logs: `curl http://localhost:8000/health`
+- ❌ Container started with risky flags but no suspicious syscall executed yet → run an in-container action like `mount`, `setuid`, or sensitive file access to generate events
+
+**Important note:**
+- Running a container with `--privileged --pid=host -v /:/host` now raises a **baseline runtime risk** (even before a syscall event).
+- Event-based alerts are still generated only when suspicious syscalls are executed.
+
+**Quick test sequence:**
+```bash
+# Start risky container
+
+docker run -it --rm \
+  --privileged \
+  --pid=host \
+  -v /:/host \
+  ubuntu:22.04 bash
+
+# Inside container, trigger high-risk syscall examples
+mount -t proc proc /mnt
+cat /etc/shadow
+python3 -c "import os; os.setuid(0)"
+```
 
 ### Issue: Seeing old test alerts
 

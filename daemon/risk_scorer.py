@@ -15,6 +15,7 @@ class RiskScorer:
             "PRIVILEGE_ESCALATION": 40,
             "MOUNT_ATTEMPT": 35,
             "CAPABILITY_CHANGE": 30,
+            "PROCESS_TRACING": 30,
             "UNAUTHORIZED_FILE_ACCESS": 20,
             "EXEC": 5
         }
