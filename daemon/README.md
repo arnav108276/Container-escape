@@ -28,6 +28,7 @@ Set environment variables:
 export BACKEND_URL=http://localhost:8000
 export MONGODB_URI=mongodb://localhost:27017
 export LOG_LEVEL=INFO
+export ALERT_THRESHOLD=40
 export EBPF_SOURCE_FILE=/ebpf/monitor.c
 ```
 
@@ -38,6 +39,8 @@ python daemon.py
 
 
 ## Runtime behavior
+- Alerts are sent to backend for events at or above `ALERT_THRESHOLD` (default: 40).
+- Auto-quarantine still requires risk score `>= 75`.
 - Daemon now attempts to load `ebpf/monitor.c` automatically using BCC.
 - If loading fails, daemon continues in degraded mode (container sync still works, syscall events do not).
 - Events with `container_id=unknown` are resolved in user space from `/proc/<pid>/cgroup` before risk scoring and alerting.
