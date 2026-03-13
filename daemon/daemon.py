@@ -298,7 +298,23 @@ class EventDaemon:
 
     def _load_ebpf(self) -> bool:
         """Load and attach eBPF program using BCC."""
-        ebpf_file = Path(__file__).resolve().parent.parent / "ebpf" / "monitor.c"
+        ebpf_source = os.getenv("EBPF_SOURCE_FILE")
+        if ebpf_source:
+            ebpf_file = Path(ebpf_source).expanduser()
+        else:
+            ebpf_file = Path(__file__).resolve().parent.parent / "ebpf" / "monitor.c"
+        if not ebpf_file.exists():
+            candidates = [
+                Path("/ebpf/monitor.c"),
+                Path(__file__).resolve().parent / "../ebpf/monitor.c",
+                Path.cwd() / "../ebpf/monitor.c",
+            ]
+            for candidate in candidates:
+                candidate = candidate.resolve()
+                if candidate.exists():
+                    ebpf_file = candidate
+                    break
+
         if not ebpf_file.exists():
             log.error("eBPF source file not found", path=str(ebpf_file))
             return False

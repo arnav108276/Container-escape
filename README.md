@@ -365,6 +365,7 @@ Dashboard → Containers → [Quarantine] button
 **Causes & Fixes:**
 - ❌ eBPF program not loaded → Check kernel version (≥5.8)
 - ❌ Daemon not running → `docker-compose logs daemon`
+- ❌ Daemon lacks eBPF runtime privileges/headers → run daemon with `privileged: true`, `pid: host`, mount `/lib/modules`, `/usr/src`, `/sys/kernel/debug`, and ensure BCC is installed in daemon image
 - ❌ Container not detected → Run sync script to populate
 - ❌ Events not reaching backend → Check logs: `curl http://localhost:8000/health`
 - ❌ Container started with risky flags but no suspicious syscall executed yet → run an in-container action like `mount`, `setuid`, or sensitive file access to generate events

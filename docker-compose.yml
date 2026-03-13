@@ -37,17 +37,24 @@ services:
     build:
       context: ./daemon
       dockerfile: Dockerfile
+    privileged: true
+    pid: host
     environment:
       MONGODB_URI: mongodb://admin:password@mongodb:27017
       BACKEND_URL: http://backend:8000
       LOG_LEVEL: INFO
+      EBPF_SOURCE_FILE: /ebpf/monitor.c
     depends_on:
       - mongodb
       - backend
     command: uv run python daemon.py
     volumes:
       - ./daemon:/app
+      - ./ebpf:/ebpf:ro
       - /var/run/docker.sock:/var/run/docker.sock
+      - /lib/modules:/lib/modules:ro
+      - /usr/src:/usr/src:ro
+      - /sys/kernel/debug:/sys/kernel/debug
 
   frontend:
     build:

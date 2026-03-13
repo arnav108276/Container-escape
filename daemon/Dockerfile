@@ -8,6 +8,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     libbpf-dev \
+    bpfcc-tools \
+    python3-bpfcc \
+    linux-libc-dev \
     ca-certificates \
     gnupg \
     lsb-release \

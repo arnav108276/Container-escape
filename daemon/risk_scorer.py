@@ -13,7 +13,7 @@ class RiskScorer:
         # Risk weights for different event types
         self.event_weights = {
             "PRIVILEGE_ESCALATION": 40,
-            "MOUNT_ATTEMPT": 35,
+            "MOUNT_ATTEMPT": 65,
             "CAPABILITY_CHANGE": 30,
             "PROCESS_TRACING": 30,
             "UNAUTHORIZED_FILE_ACCESS": 20,
