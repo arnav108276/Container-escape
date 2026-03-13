@@ -94,6 +94,7 @@ class EventDaemon:
         self.running = False
         self.bpf = None
         self.bpf_event_table = None
+        self.runtime_baseline_alerted = set()
 
         log.info("Daemon initialized", backend_url=self.backend_url, quarantine_threshold=self.quarantine_threshold)
 
@@ -288,6 +289,7 @@ class EventDaemon:
                     count=len(containers),
                     status_code=response.status_code
                 )
+                self._emit_runtime_risk_alerts(containers)
                 return response.status_code in [200, 201]
             
             return False
@@ -363,6 +365,44 @@ class EventDaemon:
         except Exception as e:
             log.error("Failed to decode eBPF event", error=str(e), exc_info=True)
 
+    def _emit_runtime_risk_alerts(self, containers: list[Dict[str, Any]]) -> None:
+        """Emit alerts for high-risk container runtime configuration baseline."""
+        try:
+            current_ids = {c.get("container_id") for c in containers if c.get("container_id")}
+            self.runtime_baseline_alerted.intersection_update(current_ids)
+
+            for container in containers:
+                container_id = container.get("container_id")
+                risk_score = int(container.get("risk_score", 0) or 0)
+                findings = container.get("runtime_findings", [])
+
+                if not container_id or risk_score < 50:
+                    continue
+
+                if container_id in self.runtime_baseline_alerted:
+                    continue
+
+                event = {
+                    "timestamp_ns": int(time.time() * 1e9),
+                    "container_id": container_id,
+                    "risk_score": risk_score,
+                    "risk_category": self._categorize_risk(risk_score),
+                    "event_type": "RUNTIME_MISCONFIG",
+                    "description": (
+                        "High-risk runtime configuration detected: "
+                        + ("; ".join(findings) if findings else "dangerous container runtime flags")
+                    ),
+                }
+
+                self._send_alert(event)
+                self.runtime_baseline_alerted.add(container_id)
+
+                if risk_score >= self.quarantine_threshold:
+                    self.container_manager.quarantine(container_id)
+
+        except Exception as e:
+            log.error("Failed to emit runtime baseline alerts", error=str(e), exc_info=True)
+
     def run(self):
         """
         Main daemon loop
@@ -400,6 +440,7 @@ class EventDaemon:
         self.forensic_logger.close()
         self.bpf = None
         self.bpf_event_table = None
+        self.runtime_baseline_alerted = set()
         log.info("Daemon stopped")
 
 

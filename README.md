@@ -390,6 +390,17 @@ cat /etc/shadow
 python3 -c "import os; os.setuid(0)"
 ```
 
+
+**Verify daemon eBPF attach:**
+```bash
+docker-compose logs daemon | rg -i "eBPF monitor loaded|Failed to load eBPF"
+```
+
+
+**WSL2 note:**
+- On Docker Desktop + WSL2, `linux-headers-$(uname -r)` may not exist in Ubuntu repos (expected).
+- In that case kernel-level syscall probes may fail to attach; baseline runtime risk alerts (`RUNTIME_MISCONFIG`) are still emitted from daemon sync for dangerous flags like `--privileged --pid=host -v /:/host`.
+
 ### Issue: Seeing old test alerts
 
 **Solution:**

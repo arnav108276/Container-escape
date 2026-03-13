@@ -48,3 +48,8 @@ python daemon.py
 - Use `pid: host`
 - Mount `/lib/modules:/lib/modules:ro`, `/usr/src:/usr/src:ro`, `/sys/kernel/debug:/sys/kernel/debug`
 - Mount eBPF source path (example: `./ebpf:/ebpf:ro`) and set `EBPF_SOURCE_FILE=/ebpf/monitor.c`
+
+
+## WSL2 / Docker Desktop caveat
+- `linux-headers-$(uname -r)` may be unavailable for the Microsoft WSL2 kernel.
+- If eBPF attach fails, daemon now still emits `RUNTIME_MISCONFIG` alerts from container sync when dangerous runtime flags are detected.
