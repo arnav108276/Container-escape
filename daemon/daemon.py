@@ -82,6 +82,7 @@ class EventDaemon:
         self.backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
         self.mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
+        self.alert_threshold = int(os.getenv("ALERT_THRESHOLD", "40"))
         self.quarantine_threshold = 75  # Risk score threshold for auto-quarantine
         
         # Initialize components
@@ -96,7 +97,12 @@ class EventDaemon:
         self.bpf_event_table = None
         self.runtime_baseline_alerted = set()
 
-        log.info("Daemon initialized", backend_url=self.backend_url, quarantine_threshold=self.quarantine_threshold)
+        log.info(
+            "Daemon initialized",
+            backend_url=self.backend_url,
+            alert_threshold=self.alert_threshold,
+            quarantine_threshold=self.quarantine_threshold,
+        )
 
     def process_event(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -157,22 +163,22 @@ class EventDaemon:
                 # Send alert to backend
                 self._send_alert(enriched)
             
-            # HIGH risk: 50-74 (Alert only)
-            elif enriched['risk_score'] >= 50:
+            # Alert-worthy risk (default: >=40)
+            elif enriched['risk_score'] >= self.alert_threshold:
                 log.warning(
-                    "HIGH RISK EVENT DETECTED",
+                    "ALERT THRESHOLD EVENT DETECTED",
                     container_id=enriched['container_id'],
                     risk_score=enriched['risk_score'],
-                    risk_category="HIGH",
+                    risk_category=enriched['risk_category'],
                     event_type=sec_event.event_type
                 )
                 # Send to backend for monitoring but don't auto-quarantine
                 self._send_alert(enriched)
-            
-            # MEDIUM risk: 40-49 (Log and monitor)
+
+            # Below alert threshold: forensic log only
             elif enriched['risk_score'] >= 40:
                 log.info(
-                    "MEDIUM RISK EVENT DETECTED",
+                    "MEDIUM RISK EVENT (below alert threshold)",
                     container_id=enriched['container_id'],
                     risk_score=enriched['risk_score'],
                     risk_category="MEDIUM",

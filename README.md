@@ -372,7 +372,16 @@ Dashboard → Containers → [Quarantine] button
 
 **Important note:**
 - Running a container with `--privileged --pid=host -v /:/host` now raises a **baseline runtime risk** (even before a syscall event).
-- Event-based alerts are still generated only when suspicious syscalls are executed.
+- Event-based alerts are generated when suspicious syscalls are executed and event risk is at or above `ALERT_THRESHOLD` (default `40`).
+
+**Logic flow checklist (end-to-end):**
+1. `daemon` loads eBPF (`eBPF monitor loaded` log line).
+2. kernel syscall event is emitted into ring buffer (`events`).
+3. daemon resolves `container_id` (from eBPF or `/proc/<pid>/cgroup`).
+4. event is enriched + scored (`risk_score`).
+5. forensic log is written to MongoDB (`security_events`).
+6. alert is POSTed to backend `/api/alerts` if score `>= ALERT_THRESHOLD`.
+7. auto-quarantine happens only when score `>= 75`.
 
 **Quick test sequence:**
 ```bash
@@ -396,6 +405,23 @@ python3 -c "import os; os.setuid(0)"
 docker-compose logs daemon | rg -i "eBPF monitor loaded|Failed to load eBPF"
 ```
 
+
+**Verify full pipeline (recommended):**
+```bash
+# 1) daemon can talk to backend and sync containers
+curl -s http://localhost:8000/api/containers | jq '.total'
+
+# 2) trigger a mount attempt in test container (high risk)
+docker exec -it <container_id_or_name> mount -t proc proc /mnt || true
+
+# 3) confirm forensic event written
+docker exec -it $(docker ps --format "{{.Names}}" | rg mongodb) \
+  mongosh "mongodb://admin:password@localhost:27017" --quiet --eval \
+  "db.security_events.find().sort({timestamp:-1}).limit(3).pretty()"
+
+# 4) confirm alert exists
+curl -s "http://localhost:8000/api/alerts?limit=10" | jq
+```
 
 **WSL2 note:**
 - On Docker Desktop + WSL2, `linux-headers-$(uname -r)` may not exist in Ubuntu repos (expected).
