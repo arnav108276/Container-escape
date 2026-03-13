@@ -5,6 +5,8 @@ from bson import ObjectId
 from typing import Optional
 import structlog
 
+from filtering import is_ignored_container
+
 log = structlog.get_logger(__name__)
 
 router = APIRouter()
@@ -37,10 +39,14 @@ async def get_events(
     try:
         db = request.app.state.db
         events = db.get_events(container_id=container_id, hours=hours, limit=limit)
-        
+        filtered_events = [
+            e for e in events
+            if not is_ignored_container(e.get('container_id', ''), e.get('container_name', ''))
+        ]
+
         return {
-            'total': len(events),
-            'events': [_to_json_serializable(e) for e in events]
+            'total': len(filtered_events),
+            'events': [_to_json_serializable(e) for e in filtered_events]
         }
     except Exception as e:
         log.error("Failed to get events", error=str(e))
@@ -61,6 +67,8 @@ async def event_statistics(
         risk_scores = []
         
         for event in events:
+            if is_ignored_container(event.get('container_id', ''), event.get('container_name', '')):
+                continue
             event_type = event.get('event_type', 'UNKNOWN')
             event_types[event_type] = event_types.get(event_type, 0) + 1
             risk_scores.append(event.get('risk_score', 0))
@@ -69,7 +77,7 @@ async def event_statistics(
             'event_counts': event_types,
             'average_risk_score': sum(risk_scores) / len(risk_scores) if risk_scores else 0,
             'max_risk_score': max(risk_scores) if risk_scores else 0,
-            'total_events': len(events)
+            'total_events': len(risk_scores)
         }
     except Exception as e:
         log.error("Failed to get statistics", error=str(e))
@@ -82,8 +90,8 @@ async def get_event(event_id: str, request: Request):
     try:
         db = request.app.state.db
         event = db.db.security_events.find_one({'_id': ObjectId(event_id)})
-        
-        if not event:
+
+        if not event or is_ignored_container(event.get('container_id', ''), event.get('container_name', '')):
             raise HTTPException(status_code=404, detail="Event not found")
         
         return _to_json_serializable(event)

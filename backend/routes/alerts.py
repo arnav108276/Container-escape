@@ -7,6 +7,7 @@ import structlog
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from filtering import is_ignored_container
 from models import Alert
 
 log = structlog.get_logger(__name__)
@@ -49,7 +50,14 @@ async def create_alert(alert: Alert, request: Request):
         db = request.app.state.db
 
         container = db.db.containers.find_one({"container_id": alert.container_id})
-        container_name = container.get("name") if container else "Unknown"
+        container_name = container.get("name") if container else (alert.container_name or "Unknown")
+
+        if is_ignored_container(alert.container_id, container_name):
+            return {
+                "status": "ignored",
+                "container_id": alert.container_id,
+                "timestamp": alert.timestamp.isoformat(),
+            }
 
         severity, risk_category = _severity_from_risk(alert.risk_score)
 
@@ -123,8 +131,12 @@ async def get_alerts(
         if container_id:
             query["container_id"] = container_id
 
-        alerts = list(db.db.alerts.find(query).sort("timestamp", -1).limit(limit))
-        return {"total": len(alerts), "alerts": [_to_json_serializable(a) for a in alerts]}
+        alerts = list(db.db.alerts.find(query).sort("timestamp", -1).limit(limit * 2))
+        filtered_alerts = [
+            a for a in alerts
+            if not is_ignored_container(a.get("container_id", ""), a.get("container_name", ""))
+        ][:limit]
+        return {"total": len(filtered_alerts), "alerts": [_to_json_serializable(a) for a in filtered_alerts]}
     except Exception as exc:
         log.error("Failed to get alerts", error=str(exc))
         raise HTTPException(status_code=500, detail="Failed to fetch alerts") from exc
@@ -138,8 +150,14 @@ async def get_alert_summary(request: Request):
         cutoff = datetime.utcnow() - timedelta(hours=24)
 
         open_query = {"acknowledged": False}
-        open_alerts = list(db.db.alerts.find(open_query).sort("timestamp", -1).limit(2000))
-        recent_alerts = list(db.db.alerts.find({"timestamp": {"$gte": cutoff}}).limit(5000))
+        open_alerts = [
+            a for a in db.db.alerts.find(open_query).sort("timestamp", -1).limit(2000)
+            if not is_ignored_container(a.get("container_id", ""), a.get("container_name", ""))
+        ]
+        recent_alerts = [
+            a for a in db.db.alerts.find({"timestamp": {"$gte": cutoff}}).limit(5000)
+            if not is_ignored_container(a.get("container_id", ""), a.get("container_name", ""))
+        ]
 
         by_severity: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
         for alert in open_alerts:
@@ -175,7 +193,7 @@ async def get_alert(alert_id: str, request: Request):
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid alert id") from exc
 
-    if not alert:
+    if not alert or is_ignored_container(alert.get("container_id", ""), alert.get("container_name", "")):
         raise HTTPException(status_code=404, detail="Alert not found")
 
     return _to_json_serializable(alert)

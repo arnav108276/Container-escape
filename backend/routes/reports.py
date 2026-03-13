@@ -7,6 +7,8 @@ import structlog
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from filtering import is_ignored_container
+
 log = structlog.get_logger(__name__)
 router = APIRouter()
 
@@ -128,8 +130,12 @@ async def list_reports(
     try:
         db = request.app.state.db
         query = {"container_id": container_id} if container_id else {}
-        reports = list(db.db.forensic_reports.find(query).sort("generated_at", -1).limit(limit))
-        return {"total": len(reports), "reports": [_to_json_serializable(r) for r in reports]}
+        reports = list(db.db.forensic_reports.find(query).sort("generated_at", -1).limit(limit * 2))
+        filtered_reports = [
+            r for r in reports
+            if not is_ignored_container(r.get("container_id", ""))
+        ][:limit]
+        return {"total": len(filtered_reports), "reports": [_to_json_serializable(r) for r in filtered_reports]}
     except Exception as exc:
         log.error("Failed to list reports", error=str(exc))
         raise HTTPException(status_code=500, detail="Failed to list reports") from exc
@@ -141,7 +147,7 @@ async def get_report(report_id: str, request: Request):
     try:
         db = request.app.state.db
         report = db.db.forensic_reports.find_one({"report_id": report_id})
-        if not report:
+        if not report or is_ignored_container(report.get("container_id", "")):
             raise HTTPException(status_code=404, detail="Report not found")
         return _to_json_serializable(report)
     except HTTPException:
@@ -171,7 +177,12 @@ async def generate_report(
     """Generate a comprehensive forensic report for a container."""
     try:
         db = request.app.state.db
+        if is_ignored_container(container_id):
+            raise HTTPException(status_code=404, detail="Container not found")
+
         container_ids = _resolve_container_ids(db, container_id)
+        if any(is_ignored_container(cid) for cid in container_ids):
+            raise HTTPException(status_code=404, detail="Container not found")
         event_query = {
             "timestamp": {"$gte": datetime.utcnow() - timedelta(hours=hours)},
             "container_id": {"$in": container_ids},

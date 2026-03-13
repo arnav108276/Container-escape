@@ -6,6 +6,8 @@ from bson import ObjectId
 import structlog
 from datetime import datetime, timedelta
 
+from filtering import is_ignored_container
+
 log = structlog.get_logger(__name__)
 
 router = APIRouter()
@@ -140,7 +142,8 @@ async def sync_containers(request: Request):
         # Upsert containers while preserving manual quarantine state from DB
         for container in containers:
             container_id = container.get('container_id')
-            if not container_id:
+            container_name = container.get('name', '')
+            if not container_id or is_ignored_container(container_id, container_name):
                 continue
 
             existing = db.db.containers.find_one({'container_id': container_id}) or {}
@@ -202,7 +205,10 @@ async def list_containers(request: Request):
         enriched_containers = []
         for container in containers:
             container_id = container.get('container_id')
-            
+            container_name = container.get('name', '')
+            if is_ignored_container(container_id, container_name):
+                continue
+
             # Calculate risk level
             risk_level, risk_score = _calculate_container_risk(db, container_id)
             
@@ -238,9 +244,9 @@ async def get_container_status(container_id: str, request: Request):
         db = request.app.state.db
         container = _resolve_container(db, container_id)
         
-        if not container:
+        if not container or is_ignored_container(container.get('container_id', ''), container.get('name', '')):
             raise HTTPException(status_code=404, detail="Container not found")
-        
+
         # Calculate risk level
         risk_level, risk_score = _calculate_container_risk(db, container_id)
         
@@ -404,7 +410,9 @@ async def get_container_risk(container_id: str, request: Request):
 
         resolved = _resolve_container(db, container_id)
         canonical_container_id = resolved.get('container_id', container_id)
-        
+        if is_ignored_container(canonical_container_id, resolved.get('name', '')):
+            raise HTTPException(status_code=404, detail="Container not found")
+
         # Get event counts
         cutoff_24h = datetime.utcnow() - timedelta(hours=24)
         event_count = db.db.security_events.count_documents({
@@ -442,7 +450,9 @@ async def get_container_vulnerabilities(container_id: str, limit: int = 10, requ
 
         container = _resolve_container(db, container_id) or {}
         canonical_container_id = container.get('container_id', container_id)
-        
+        if is_ignored_container(canonical_container_id, container.get('name', '')):
+            raise HTTPException(status_code=404, detail="Container not found")
+
         # Get recent alerts (vulnerabilities detected)
         alerts = list(db.db.alerts.find({
             'container_id': canonical_container_id,

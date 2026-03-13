@@ -4,6 +4,7 @@ import docker
 import subprocess
 import json
 import platform
+import os
 import structlog
 from typing import Optional, List, Dict
 
@@ -16,6 +17,7 @@ class ContainerManager:
     def __init__(self):
         self.quarantined_containers = set()
         self.os_type = platform.system()  # Windows, Linux, Darwin
+        self.ignored_prefix = os.getenv("IGNORED_CONTAINER_PREFIX", "container-escape-daemon")
         try:
             self.docker_client = docker.from_env()
         except Exception as e:
@@ -40,6 +42,9 @@ class ContainerManager:
                 
                 for container in containers:
                     try:
+                        if self._is_ignored_container_name(container.name):
+                            continue
+
                         baseline_score, findings = self._assess_runtime_risk(container)
                         container_list.append({
                             'container_id': container.short_id,
@@ -82,12 +87,16 @@ class ContainerManager:
                         continue
                     try:
                         container_data = json.loads(line)
+                        container_name = container_data.get('Names', '')
+                        if self._is_ignored_container_name(container_name):
+                            continue
+
                         full_id = container_data.get('ID', '')
                         baseline_score, findings = self._assess_runtime_risk_from_cli(full_id, inspect_cache)
                         containers.append({
                             'container_id': full_id[:12],
                             'full_id': full_id,
-                            'name': container_data.get('Names', ''),
+                            'name': container_name,
                             'image': container_data.get('Image', ''),
                             'status': 'running',
                             'quarantined': False,
@@ -110,6 +119,10 @@ class ContainerManager:
         # Fallback: Return empty list (containers can be populated via API)
         log.info("No containers discovered - use API endpoint or script to populate", os=self.os_type)
         return []
+
+    def _is_ignored_container_name(self, name: str) -> bool:
+        """Return True when container name should be excluded from processing."""
+        return bool(name) and name.startswith(self.ignored_prefix)
 
     def _assess_runtime_risk_from_cli(self, container_id: str, inspect_cache: Dict[str, Dict]) -> tuple[int, List[str]]:
         """Compute runtime risk score when Docker SDK is unavailable using `docker inspect`."""
