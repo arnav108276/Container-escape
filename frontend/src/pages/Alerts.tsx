@@ -123,24 +123,44 @@ export default function Alerts() {
       </div>
 
       {summary && (
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
-            <p className="text-xs uppercase text-gray-400">Open Alerts</p>
-            <p className="mt-1 text-2xl font-bold text-white">{summary.open_alerts}</p>
-          </div>
-          <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
-            <p className="text-xs uppercase text-gray-400">Alerts (24h)</p>
-            <p className="mt-1 text-2xl font-bold text-white">{summary.alerts_last_24h}</p>
-          </div>
-          <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
-            <p className="text-xs uppercase text-gray-400">Critical Open</p>
-            <p className="mt-1 text-2xl font-bold text-red-300">{summary.by_severity?.critical || 0}</p>
-          </div>
-          <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
-            <p className="text-xs uppercase text-gray-400">High Open</p>
-            <p className="mt-1 text-2xl font-bold text-orange-300">{summary.by_severity?.high || 0}</p>
-          </div>
-        </section>
+        <>
+          <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+              <p className="text-xs uppercase text-gray-400">Open Alerts</p>
+              <p className="mt-1 text-2xl font-bold text-white">{summary.open_alerts}</p>
+            </div>
+            <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+              <p className="text-xs uppercase text-gray-400">Alerts (24h)</p>
+              <p className="mt-1 text-2xl font-bold text-white">{summary.alerts_last_24h}</p>
+            </div>
+            <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+              <p className="text-xs uppercase text-gray-400">Critical Open</p>
+              <p className="mt-1 text-2xl font-bold text-red-300">{summary.by_severity?.critical || 0}</p>
+            </div>
+            <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
+              <p className="text-xs uppercase text-gray-400">High Open</p>
+              <p className="mt-1 text-2xl font-bold text-orange-300">{summary.by_severity?.high || 0}</p>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-gray-700 bg-gray-800 p-4">
+            <h2 className="text-lg font-semibold text-white">Containers with Alerts (24h)</h2>
+            {summary.top_containers?.length ? (
+              <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+                {summary.top_containers.map((container) => (
+                  <div key={container.container_id} className="flex items-center justify-between rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm">
+                    <span className="font-mono text-gray-200">{container.container_id}</span>
+                    <span className="rounded bg-blue-950 px-2 py-0.5 text-xs font-semibold text-blue-200">
+                      {container.count} alerts
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-gray-400">No containers with alerts in the last 24 hours.</p>
+            )}
+          </section>
+        </>
       )}
 
       {errorMessage && <div className="rounded-lg border border-red-700 bg-red-900/40 p-3 text-red-200">{errorMessage}</div>}
