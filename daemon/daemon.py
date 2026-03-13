@@ -84,6 +84,7 @@ class EventDaemon:
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
         self.alert_threshold = int(os.getenv("ALERT_THRESHOLD", "40"))
         self.quarantine_threshold = 75  # Risk score threshold for auto-quarantine
+        self.ignored_container_prefix = os.getenv("IGNORED_CONTAINER_PREFIX", "container-escape-daemon")
         
         # Initialize components
         self.event_processor = EventProcessor()
@@ -126,6 +127,9 @@ class EventDaemon:
         try:
             # Step 1: Validate and parse event
             sec_event = SecurityEvent(**event)
+
+            if sec_event.container_id.startswith(self.ignored_container_prefix):
+                return None
             
             log.info(
                 "Event received",
@@ -137,6 +141,10 @@ class EventDaemon:
             
             # Step 2: Enrich event with additional context
             enriched = self.event_processor.enrich(sec_event)
+
+            container_name = (enriched.get("container_info") or {}).get("Name", "").lstrip("/")
+            if container_name.startswith(self.ignored_container_prefix):
+                return None
             
             # Step 3: Calculate risk score
             enriched['risk_score'] = self.risk_scorer.calculate(enriched)
@@ -379,8 +387,12 @@ class EventDaemon:
 
             for container in containers:
                 container_id = container.get("container_id")
+                container_name = container.get("name", "")
                 risk_score = int(container.get("risk_score", 0) or 0)
                 findings = container.get("runtime_findings", [])
+
+                if container_name.startswith(self.ignored_container_prefix):
+                    continue
 
                 if not container_id or risk_score < 50:
                     continue
