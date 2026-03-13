@@ -13,6 +13,7 @@
 #define EVENT_MOUNT_ATTEMPT 3
 #define EVENT_EXEC 4
 #define EVENT_CAP_CHANGE 5
+#define EVENT_PROCESS_TRACING 6
 
 /* Risk levels */
 #define RISK_LOW 1

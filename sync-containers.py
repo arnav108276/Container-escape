@@ -40,8 +40,10 @@ def get_containers() -> List[Dict]:
                     'image': container_data.get('Image', ''),
                     'status': 'running',
                     'quarantined': False,
-                    'risk_level': 'low',
-                    'alert_count': 0
+                    'risk_level': 'LOW',
+                    'risk_score': 0,
+                    'alert_count': 0,
+                    'runtime_findings': []
                 })
             except json.JSONDecodeError:
                 continue
