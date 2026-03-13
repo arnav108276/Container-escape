@@ -16,6 +16,7 @@ import os
 import sys
 import time
 import logging
+from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -91,7 +92,9 @@ class EventDaemon:
         
         self.http_client = httpx.Client(timeout=10.0)
         self.running = False
-        
+        self.bpf = None
+        self.bpf_event_table = None
+
         log.info("Daemon initialized", backend_url=self.backend_url, quarantine_threshold=self.quarantine_threshold)
 
     def process_event(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -140,7 +143,7 @@ class EventDaemon:
             if enriched['risk_score'] >= 75:
                 log.warning(
                     "CRITICAL EVENT DETECTED - AUTO-QUARANTINE INITIATED",
-                    container_id=sec_event.container_id,
+                    container_id=enriched['container_id'],
                     risk_score=enriched['risk_score'],
                     risk_category="CRITICAL",
                     event_type=sec_event.event_type,
@@ -148,7 +151,7 @@ class EventDaemon:
                 )
                 
                 # Quarantine container immediately
-                self.container_manager.quarantine(sec_event.container_id)
+                self.container_manager.quarantine(enriched['container_id'])
                 
                 # Send alert to backend
                 self._send_alert(enriched)
@@ -157,7 +160,7 @@ class EventDaemon:
             elif enriched['risk_score'] >= 50:
                 log.warning(
                     "HIGH RISK EVENT DETECTED",
-                    container_id=sec_event.container_id,
+                    container_id=enriched['container_id'],
                     risk_score=enriched['risk_score'],
                     risk_category="HIGH",
                     event_type=sec_event.event_type
@@ -169,7 +172,7 @@ class EventDaemon:
             elif enriched['risk_score'] >= 40:
                 log.info(
                     "MEDIUM RISK EVENT DETECTED",
-                    container_id=sec_event.container_id,
+                    container_id=enriched['container_id'],
                     risk_score=enriched['risk_score'],
                     risk_category="MEDIUM",
                     event_type=sec_event.event_type
@@ -179,7 +182,7 @@ class EventDaemon:
             else:
                 log.debug(
                     "LOW RISK EVENT",
-                    container_id=sec_event.container_id,
+                    container_id=enriched['container_id'],
                     risk_score=enriched['risk_score'],
                     risk_category="LOW",
                     event_type=sec_event.event_type
@@ -293,52 +296,96 @@ class EventDaemon:
             log.error("Failed to sync containers", error=str(e), exc_info=True)
             return False
 
+    def _load_ebpf(self) -> bool:
+        """Load and attach eBPF program using BCC."""
+        ebpf_source = os.getenv("EBPF_SOURCE_FILE")
+        if ebpf_source:
+            ebpf_file = Path(ebpf_source).expanduser()
+        else:
+            ebpf_file = Path(__file__).resolve().parent.parent / "ebpf" / "monitor.c"
+        if not ebpf_file.exists():
+            candidates = [
+                Path("/ebpf/monitor.c"),
+                Path(__file__).resolve().parent / "../ebpf/monitor.c",
+                Path.cwd() / "../ebpf/monitor.c",
+            ]
+            for candidate in candidates:
+                candidate = candidate.resolve()
+                if candidate.exists():
+                    ebpf_file = candidate
+                    break
+
+        if not ebpf_file.exists():
+            log.error("eBPF source file not found", path=str(ebpf_file))
+            return False
+
+        try:
+            from bcc import BPF  # type: ignore
+
+            self.bpf = BPF(src_file=str(ebpf_file), cflags=["-I", str(ebpf_file.parent)])
+            self.bpf_event_table = self.bpf["events"]
+            self.bpf_event_table.open_ring_buffer(self._on_ringbuf_event)
+            log.info("eBPF monitor loaded", source=str(ebpf_file), map_name="events")
+            return True
+        except Exception as e:
+            log.warning("Failed to load eBPF monitor; running without kernel events", error=str(e))
+            self.bpf = None
+            self.bpf_event_table = None
+            return False
+
+    def _on_ringbuf_event(self, _ctx, data, _size):
+        """Ring buffer callback: decode kernel event and send to pipeline."""
+        if not self.bpf_event_table:
+            return
+
+        try:
+            event = self.bpf_event_table.event(data)
+            event_dict = {
+                "timestamp_ns": int(getattr(event, "timestamp_ns", 0)),
+                "pid": int(getattr(event, "pid", 0)),
+                "uid": int(getattr(event, "uid", 0)),
+                "gid": int(getattr(event, "gid", 0)),
+                "event_type": int(getattr(event, "event_type", 0)),
+                "risk_level": int(getattr(event, "risk_level", 0)),
+                "container_id": bytes(getattr(event, "container_id", b""))
+                    .split(b"\x00", 1)[0]
+                    .decode("utf-8", errors="ignore"),
+                "filepath": bytes(getattr(event, "filepath", b""))
+                    .split(b"\x00", 1)[0]
+                    .decode("utf-8", errors="ignore"),
+                "syscall_nr": int(getattr(event, "syscall_nr", 0)),
+                "syscall_arg0": int(getattr(event, "syscall_arg0", 0)),
+                "syscall_arg1": int(getattr(event, "syscall_arg1", 0)),
+                "syscall_arg2": int(getattr(event, "syscall_arg2", 0)),
+                "syscall_arg3": int(getattr(event, "syscall_arg3", 0)),
+            }
+            self.process_event(event_dict)
+        except Exception as e:
+            log.error("Failed to decode eBPF event", error=str(e), exc_info=True)
+
     def run(self):
         """
         Main daemon loop
-        
-        Process events from eBPF ring buffer and maintain container sync.
-        In production, this reads events from:
-            bpf_buffer = BPFRingBuffer(...)
-            bpf_buffer.open_ring_buffer(callback=self.process_event)
-        
-        For development without kernel support, this waits for external events.
+
+        Poll eBPF ring buffer when available and keep container inventory synced.
         """
         self.running = True
-        log.info("Daemon started, waiting for events...")
-        
-        last_sync = time.time()
-        
-        # In production, uncomment to enable eBPF event monitoring:
-        # -------------------------------------------------------
-        # try:
-        #     from bcc import BPF
-        #     
-        #     # Load eBPF programs
-        #     bpf = BPF(src_file="detections.c", debug=0)
-        #     bpf.attach_kprobe(event="do_mount", fn_name="trace_mount")
-        #     
-        #     # Open ring buffer for events
-        #     ring_buf = bpf["events"]
-        #     ring_buf.open_ring_buffer(callback=self.process_event)
-        #     
-        #     log.info("eBPF programs loaded and attached")
-        # except Exception as e:
-        #     log.error("Failed to load eBPF programs", error=str(e))
-        
+        log.info("Daemon started")
+
+        last_sync = 0.0
+        ebpf_loaded = self._load_ebpf()
+
         try:
-            # Initial container sync
-            self._sync_containers()
-            
             while self.running:
-                # Sync containers every 10 seconds
                 if time.time() - last_sync > 10:
                     self._sync_containers()
                     last_sync = time.time()
-                
-                # Poll for events (in production this would be event-driven)
-                time.sleep(0.1)
-        
+
+                if ebpf_loaded and self.bpf:
+                    self.bpf.ring_buffer_poll(timeout=100)
+                else:
+                    time.sleep(0.1)
+
         except KeyboardInterrupt:
             log.info("Daemon shutting down (KeyboardInterrupt)")
             self.running = False
@@ -351,6 +398,8 @@ class EventDaemon:
         self.running = False
         self.http_client.close()
         self.forensic_logger.close()
+        self.bpf = None
+        self.bpf_event_table = None
         log.info("Daemon stopped")
 
 
