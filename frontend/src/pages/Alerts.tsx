@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../services/api";
 
 interface Alert {
-  _id?: string;
+  alert_id?: string;
   timestamp: string;
   container_id: string;
   container_name?: string;
@@ -56,7 +56,7 @@ export default function Alerts() {
   }, [includeAcknowledged]);
 
   const selectAll = useMemo(
-    () => alerts.length > 0 && selectedAlerts.size === alerts.filter((a) => a._id).length,
+    () => alerts.length > 0 && selectedAlerts.size === alerts.filter((a) => a.alert_id).length,
     [alerts, selectedAlerts],
   );
 
@@ -86,7 +86,7 @@ export default function Alerts() {
       setSelectedAlerts(new Set());
       return;
     }
-    setSelectedAlerts(new Set(alerts.filter((a) => a._id).map((a) => a._id!)));
+    setSelectedAlerts(new Set(alerts.filter((a) => a.alert_id).map((a) => a.alert_id!)));
   };
 
   const acknowledge = async (type: "single" | "selected" | "all", alertId?: string) => {
@@ -202,14 +202,14 @@ export default function Alerts() {
             </div>
             {alerts.map((alert, idx) => (
               <article
-                key={`${alert._id || alert.timestamp}-${idx}`}
-                className={`rounded-lg border p-4 ${selectedAlerts.has(alert._id || "") ? "border-blue-500 bg-slate-900" : "border-gray-700 bg-gray-900"}`}
+                key={`${alert.alert_id || alert.timestamp}-${idx}`}
+                className={`rounded-lg border p-4 ${selectedAlerts.has(alert.alert_id || "") ? "border-blue-500 bg-slate-900" : "border-gray-700 bg-gray-900"}`}
               >
                 <div className="flex gap-3">
                   <input
                     type="checkbox"
-                    checked={selectedAlerts.has(alert._id || "")}
-                    onChange={() => toggleAlert(alert._id)}
+                    checked={selectedAlerts.has(alert.alert_id || "")}
+                    onChange={() => toggleAlert(alert.alert_id)}
                     className="mt-1 h-4 w-4 rounded border-gray-600 bg-gray-700"
                   />
                   <div className="flex-1">
@@ -230,8 +230,8 @@ export default function Alerts() {
                       <span>Risk score: <strong className="text-white">{alert.risk_score}/100</strong></span>
                       <span>{new Date(alert.timestamp).toLocaleString()}</span>
                       <button
-                        onClick={() => acknowledge("single", alert._id)}
-                        disabled={acknowledging || !alert._id}
+                        onClick={() => acknowledge("single", alert.alert_id)}
+                        disabled={acknowledging || !alert.alert_id}
                         className="rounded bg-yellow-600 px-3 py-1 font-semibold text-white hover:bg-yellow-700 disabled:bg-gray-600"
                       >
                         Dismiss

@@ -1,6 +1,6 @@
 """Reports API routes"""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import structlog
@@ -18,12 +18,44 @@ def _to_json_serializable(doc):
     if isinstance(doc, list):
         return [_to_json_serializable(item) for item in doc]
     if isinstance(doc, dict):
-        return {
+        serialized = {
             k: str(v) if isinstance(v, ObjectId) else v.isoformat() if hasattr(v, "isoformat") else _to_json_serializable(v)
             for k, v in doc.items()
             if k != "_id"
         }
+        if doc.get("_id") is not None:
+            serialized["id"] = str(doc["_id"])
+        return serialized
     return doc
+
+
+def _resolve_container_ids(db, container_id: str) -> list[str]:
+    """Resolve short/full container IDs so reports include all matching events."""
+    ids = {container_id}
+
+    container = db.db.containers.find_one({"container_id": container_id})
+    if container:
+        if container.get("container_id"):
+            ids.add(container["container_id"])
+        if container.get("full_id"):
+            ids.add(container["full_id"])
+
+    by_full = db.db.containers.find_one({"full_id": container_id})
+    if by_full:
+        if by_full.get("container_id"):
+            ids.add(by_full["container_id"])
+        if by_full.get("full_id"):
+            ids.add(by_full["full_id"])
+
+    if len(container_id) >= 12:
+        by_prefix = db.db.containers.find_one({"full_id": {"$regex": f"^{container_id}"}})
+        if by_prefix:
+            if by_prefix.get("container_id"):
+                ids.add(by_prefix["container_id"])
+            if by_prefix.get("full_id"):
+                ids.add(by_prefix["full_id"])
+
+    return [cid for cid in ids if cid]
 
 
 def _get_recommendations(events: list, alerts: list) -> list:
@@ -139,9 +171,17 @@ async def generate_report(
     """Generate a comprehensive forensic report for a container."""
     try:
         db = request.app.state.db
-        events = db.get_events(container_id=container_id, hours=hours, limit=10000)
+        container_ids = _resolve_container_ids(db, container_id)
+        event_query = {
+            "timestamp": {"$gte": datetime.utcnow() - timedelta(hours=hours)},
+            "container_id": {"$in": container_ids},
+        }
+        events = list(db.db.security_events.find(event_query).sort("timestamp", -1).limit(10000))
         open_alerts = list(
-            db.db.alerts.find({"container_id": container_id, "acknowledged": False}).sort("timestamp", -1).limit(200)
+            db.db.alerts
+            .find({"container_id": {"$in": container_ids}, "acknowledged": False})
+            .sort("timestamp", -1)
+            .limit(200)
         )
 
         top_event_types: dict[str, int] = {}
@@ -157,7 +197,7 @@ async def generate_report(
 
         report = {
             "report_id": f"{container_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
-            "container_id": container_id,
+            "container_id": min(container_ids, key=len) if container_ids else container_id,
             "generated_at": datetime.utcnow(),
             "analysis_window_hours": hours,
             "event_count": len(events),
