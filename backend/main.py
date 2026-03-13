@@ -97,7 +97,7 @@ async def system_overview(request: Request):
     alert_docs = []
     event_docs = []
     if db_status == "connected":
-        alert_docs = list(db.db.alerts.find({"acknowledged": False}).sort("timestamp", -1).limit(5))
+        alert_docs = list(db.db.alerts.find({"acknowledged": False}).sort("timestamp", -1))
         event_docs = db.get_events(hours=1, limit=10)
 
     return {

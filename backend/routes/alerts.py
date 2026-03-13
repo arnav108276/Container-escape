@@ -156,7 +156,7 @@ async def get_alert_summary(request: Request):
                 [{"container_id": k, "count": v} for k, v in top_containers.items()],
                 key=lambda x: x["count"],
                 reverse=True,
-            )[:5],
+            ),
         }
     except Exception as exc:
         log.error("Failed to get alert summary", error=str(exc))
