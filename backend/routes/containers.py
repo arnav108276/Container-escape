@@ -37,6 +37,9 @@ def _calculate_container_risk(db, container_id: str) -> tuple[str, int]:
     try:
         cutoff_24h = datetime.utcnow() - timedelta(hours=24)
         
+        container = db.db.containers.find_one({'container_id': container_id})
+        baseline_score = int((container or {}).get('risk_score', 0) or 0)
+
         # Get alerts for this container in last 24 hours
         alerts = list(db.db.alerts.find({
             'container_id': container_id,
@@ -50,7 +53,13 @@ def _calculate_container_risk(db, container_id: str) -> tuple[str, int]:
         }))
         
         if not alerts and not events:
-            return ('LOW', 0)
+            if baseline_score >= 75:
+                return ('CRITICAL', baseline_score)
+            if baseline_score >= 50:
+                return ('HIGH', baseline_score)
+            if baseline_score >= 40:
+                return ('MEDIUM', baseline_score)
+            return ('LOW', baseline_score)
         
         # Calculate average risk score from alerts and events
         scores = []
@@ -61,24 +70,25 @@ def _calculate_container_risk(db, container_id: str) -> tuple[str, int]:
         
         if scores:
             avg_risk = sum(scores) / len(scores)
+            final_score = max(int(avg_risk), baseline_score)
             
             # Determine risk level based on categorization
             # CRITICAL: >= 75 (Auto-quarantine threshold)
             # HIGH: 50-74 (Alert and monitor)
             # MEDIUM: 40-49 (Log and monitor)
             # LOW: < 40 (Forensic log only)
-            if avg_risk >= 75:
+            if final_score >= 75:
                 risk_level = 'CRITICAL'
-            elif avg_risk >= 50:
+            elif final_score >= 50:
                 risk_level = 'HIGH'
-            elif avg_risk >= 40:
+            elif final_score >= 40:
                 risk_level = 'MEDIUM'
             else:
                 risk_level = 'LOW'
             
-            return (risk_level, int(avg_risk))
+            return (risk_level, final_score)
         
-        return ('LOW', 0)
+        return ('LOW', baseline_score)
     except Exception as e:
         log.error("Error calculating container risk", error=str(e))
         return ('LOW', 0)
@@ -103,9 +113,11 @@ async def sync_containers(request: Request):
                 'name': container.get('name'),
                 'image': container.get('image'),
                 'status': container.get('status', 'running'),
-                'risk_level': 'LOW',  # Will be calculated on retrieval
+                'risk_level': container.get('risk_level', 'LOW'),
+                'risk_score': int(container.get('risk_score', 0) or 0),
                 'alert_count': 0,  # Will be calculated on retrieval
                 'quarantined': container.get('quarantined', False),
+                'runtime_findings': container.get('runtime_findings', []),
                 'synced_at': datetime.utcnow()
             })
         

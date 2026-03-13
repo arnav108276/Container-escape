@@ -1,4 +1,4 @@
-#include <uapi/linux/ptrace.h>
+#include <linux/ptrace.h>
 #include <net/sock.h>
 #include <bcc/proto.h>
 #include <linux/sched.h>
@@ -38,6 +38,7 @@ TRACEPOINT_PROBE(syscalls, sys_enter_clone) {
     event->pid = bpf_get_current_pid_tgid() >> 32;
     event->uid = bpf_get_current_uid_gid() & 0xFFFFFFFF;
     event->gid = bpf_get_current_uid_gid() >> 32;
+    event->event_type = EVENT_EXEC;
     event->syscall_nr = 56; /* clone */
     event->risk_level = RISK_LOW;
     
@@ -57,6 +58,7 @@ TRACEPOINT_PROBE(syscalls, sys_enter_ptrace) {
     event->pid = bpf_get_current_pid_tgid() >> 32;
     event->uid = bpf_get_current_uid_gid() & 0xFFFFFFFF;
     event->gid = bpf_get_current_uid_gid() >> 32;
+    event->event_type = EVENT_PROCESS_TRACING;
     event->syscall_nr = 101; /* ptrace */
     event->risk_level = RISK_HIGH;
     event->syscall_arg0 = args->request;
@@ -78,6 +80,7 @@ TRACEPOINT_PROBE(syscalls, sys_enter_socket) {
     event->pid = bpf_get_current_pid_tgid() >> 32;
     event->uid = bpf_get_current_uid_gid() & 0xFFFFFFFF;
     event->gid = bpf_get_current_uid_gid() >> 32;
+    event->event_type = EVENT_EXEC;
     event->syscall_nr = 41; /* socket */
     event->syscall_arg0 = args->family;
     event->syscall_arg1 = args->type;

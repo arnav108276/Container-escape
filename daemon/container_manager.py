@@ -40,6 +40,7 @@ class ContainerManager:
                 
                 for container in containers:
                     try:
+                        baseline_score, findings = self._assess_runtime_risk(container)
                         container_list.append({
                             'container_id': container.short_id,
                             'full_id': container.id,
@@ -47,8 +48,10 @@ class ContainerManager:
                             'image': container.image.tags[0] if container.image.tags else 'unknown',
                             'status': container.status,
                             'quarantined': container.id in self.quarantined_containers,
-                            'risk_level': 'low',
-                            'alert_count': 0
+                            'risk_level': self._score_to_level(baseline_score),
+                            'risk_score': baseline_score,
+                            'alert_count': 0,
+                            'runtime_findings': findings,
                         })
                     except Exception as e:
                         log.warning("Failed to process container", error=str(e))
@@ -85,8 +88,10 @@ class ContainerManager:
                             'image': container_data.get('Image', ''),
                             'status': 'running',
                             'quarantined': False,
-                            'risk_level': 'low',
-                            'alert_count': 0
+                            'risk_level': 'LOW',
+                            'risk_score': 0,
+                            'alert_count': 0,
+                            'runtime_findings': []
                         })
                     except json.JSONDecodeError:
                         continue
@@ -102,6 +107,48 @@ class ContainerManager:
         # Fallback: Return empty list (containers can be populated via API)
         log.info("No containers discovered - use API endpoint or script to populate", os=self.os_type)
         return []
+
+    def _assess_runtime_risk(self, container) -> tuple[int, List[str]]:
+        """Compute a baseline runtime risk score from container configuration."""
+        score = 0
+        findings: List[str] = []
+
+        attrs = container.attrs or {}
+        host_config = attrs.get("HostConfig", {})
+
+        if host_config.get("Privileged"):
+            score += 55
+            findings.append("Container is running in privileged mode")
+
+        if host_config.get("PidMode") == "host":
+            score += 25
+            findings.append("Container shares host PID namespace")
+
+        binds = host_config.get("Binds") or []
+        if any(str(bind).startswith("/:") or str(bind).startswith("/:/") for bind in binds):
+            score += 30
+            findings.append("Host root filesystem is bind-mounted into the container")
+
+        cap_add = host_config.get("CapAdd") or []
+        if any(cap in {"SYS_ADMIN", "ALL", "SYS_PTRACE"} for cap in cap_add):
+            score += 20
+            findings.append("Dangerous Linux capabilities are added (SYS_ADMIN/ALL/SYS_PTRACE)")
+
+        security_opt = host_config.get("SecurityOpt") or []
+        if any(opt in {"seccomp=unconfined", "apparmor=unconfined", "label=disable"} for opt in security_opt):
+            score += 15
+            findings.append("Container security profile is unconfined")
+
+        return min(score, 100), findings
+
+    def _score_to_level(self, score: int) -> str:
+        if score >= 75:
+            return "CRITICAL"
+        if score >= 50:
+            return "HIGH"
+        if score >= 40:
+            return "MEDIUM"
+        return "LOW"
     
     
     def quarantine(self, container_id: str) -> bool:
