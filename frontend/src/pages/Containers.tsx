@@ -13,6 +13,9 @@ interface Container {
 interface Vulnerability {
   container_id: string;
   detected_alerts: number;
+  runtime_findings?: string[];
+  baseline_risk_score?: number;
+  baseline_risk_level?: string;
   recent_alerts: Array<{
     timestamp: string;
     reason: string;
@@ -30,16 +33,20 @@ export default function Containers() {
   const [successMessage, setSuccessMessage] = useState('');
   const [vulnerabilities, setVulnerabilities] = useState<Record<string, Vulnerability>>({});
   const [hoveredContainer, setHoveredContainer] = useState<string | null>(null);
+  const [initialized, setInitialized] = useState(false);
 
   const fetchContainers = async () => {
-    setLoading(true);
+    if (!initialized) setLoading(true);
     try {
       const response = await apiClient.listContainers();
       setContainers(response.data.containers || []);
     } catch (error) {
       console.error('Failed to fetch containers:', error);
     } finally {
-      setLoading(false);
+      if (!initialized) {
+        setLoading(false);
+        setInitialized(true);
+      }
     }
   };
 
@@ -167,6 +174,15 @@ export default function Containers() {
                         <div className="text-white text-xs space-y-2">
                           <div className="font-bold border-b border-gray-700 pb-1">Vulnerabilities Detected</div>
                           
+                          {(vulnerabilities[container.container_id].runtime_findings || []).length > 0 && (
+                            <div className="border-b border-gray-700 pb-2">
+                              <div className="font-semibold text-red-300 mb-1">Runtime Misconfigurations:</div>
+                              {(vulnerabilities[container.container_id].runtime_findings || []).map((finding, idx) => (
+                                <div key={`finding-${idx}`} className="text-red-200 text-xs">• {finding}</div>
+                              ))}
+                            </div>
+                          )}
+
                           {vulnerabilities[container.container_id].detected_alerts > 0 ? (
                             <>
                               <div className="text-gray-300">
@@ -199,7 +215,7 @@ export default function Containers() {
                               )}
                             </>
                           ) : (
-                            <div className="text-gray-400">No vulnerabilities detected</div>
+                            <div className="text-gray-400">No recent alerts/events detected</div>
                           )}
                         </div>
                       </div>

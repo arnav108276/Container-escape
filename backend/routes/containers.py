@@ -11,6 +11,37 @@ log = structlog.get_logger(__name__)
 router = APIRouter()
 
 
+def _resolve_container(db, container_id: str) -> dict:
+    """Resolve a container by short ID, full ID prefix, or exact full ID."""
+    container = db.db.containers.find_one({'container_id': container_id})
+    if container:
+        return container
+
+    container = db.db.containers.find_one({'full_id': container_id})
+    if container:
+        return container
+
+    # Support callers passing short IDs against stored full IDs
+    container = db.db.containers.find_one({'full_id': {'$regex': f'^{container_id}'}})
+    return container or {}
+
+
+def _get_container_manager(app_state):
+    """Best-effort loader for runtime container manager."""
+    if hasattr(app_state, 'container_manager'):
+        return app_state.container_manager
+
+    try:
+        from daemon.container_manager import ContainerManager  # type: ignore
+
+        app_state.container_manager = ContainerManager()
+        return app_state.container_manager
+    except Exception as e:
+        log.warning("Runtime container manager unavailable; DB-only quarantine mode", error=str(e))
+        app_state.container_manager = None
+        return None
+
+
 def _to_json_serializable(doc):
     """Convert MongoDB document to JSON-serializable format"""
     if doc is None:
@@ -37,18 +68,19 @@ def _calculate_container_risk(db, container_id: str) -> tuple[str, int]:
     try:
         cutoff_24h = datetime.utcnow() - timedelta(hours=24)
         
-        container = db.db.containers.find_one({'container_id': container_id})
+        container = _resolve_container(db, container_id)
+        canonical_container_id = (container or {}).get('container_id', container_id)
         baseline_score = int((container or {}).get('risk_score', 0) or 0)
 
         # Get alerts for this container in last 24 hours
         alerts = list(db.db.alerts.find({
-            'container_id': container_id,
+            'container_id': canonical_container_id,
             'timestamp': {'$gte': cutoff_24h}
         }))
         
         # Get events for this container in last 24 hours
         events = list(db.db.security_events.find({
-            'container_id': container_id,
+            'container_id': canonical_container_id,
             'timestamp': {'$gte': cutoff_24h}
         }))
         
@@ -103,23 +135,50 @@ async def sync_containers(request: Request):
         
         db = request.app.state.db
         
-        # Clear old containers and insert new ones
-        db.db.containers.delete_many({})
-        
+        container_ids = [c.get('container_id') for c in containers if c.get('container_id')]
+
+        # Upsert containers while preserving manual quarantine state from DB
         for container in containers:
-            db.db.containers.insert_one({
-                'container_id': container.get('container_id'),
+            container_id = container.get('container_id')
+            if not container_id:
+                continue
+
+            existing = db.db.containers.find_one({'container_id': container_id}) or {}
+            preserved_quarantine = bool(existing.get('quarantined', False))
+            incoming_quarantine = bool(container.get('quarantined', False))
+            quarantined = preserved_quarantine or incoming_quarantine
+
+            status = 'quarantined' if quarantined else container.get('status', 'running')
+
+            update_doc = {
                 'full_id': container.get('full_id'),
                 'name': container.get('name'),
                 'image': container.get('image'),
-                'status': container.get('status', 'running'),
+                'status': status,
                 'risk_level': container.get('risk_level', 'LOW'),
                 'risk_score': int(container.get('risk_score', 0) or 0),
-                'alert_count': 0,  # Will be calculated on retrieval
-                'quarantined': container.get('quarantined', False),
+                'alert_count': 0,  # Calculated on retrieval
+                'quarantined': quarantined,
                 'runtime_findings': container.get('runtime_findings', []),
                 'synced_at': datetime.utcnow()
-            })
+            }
+
+            # Keep historical quarantine metadata if already present
+            for key in ['quarantine_reason', 'quarantined_by', 'quarantined_at']:
+                if existing.get(key) is not None:
+                    update_doc[key] = existing.get(key)
+
+            db.db.containers.update_one(
+                {'container_id': container_id},
+                {'$set': update_doc, '$setOnInsert': {'container_id': container_id}},
+                upsert=True
+            )
+
+        # Remove stale containers that are no longer running
+        if container_ids:
+            db.db.containers.delete_many({'container_id': {'$nin': container_ids}})
+        else:
+            db.db.containers.delete_many({})
         
         log.info("Containers synchronized", count=len(containers))
         
@@ -177,7 +236,7 @@ async def get_container_status(container_id: str, request: Request):
     """Get container status and details"""
     try:
         db = request.app.state.db
-        container = db.db.containers.find_one({'container_id': container_id})
+        container = _resolve_container(db, container_id)
         
         if not container:
             raise HTTPException(status_code=404, detail="Container not found")
@@ -185,10 +244,12 @@ async def get_container_status(container_id: str, request: Request):
         # Calculate risk level
         risk_level, risk_score = _calculate_container_risk(db, container_id)
         
+        canonical_container_id = container.get('container_id', container_id)
+
         # Get recent events for this container
         cutoff_24h = datetime.utcnow() - timedelta(hours=24)
         events = list(db.db.security_events.find({
-            'container_id': container_id,
+            'container_id': canonical_container_id,
             'timestamp': {'$gte': cutoff_24h}
         }).sort('timestamp', -1).limit(20))
         
@@ -221,20 +282,17 @@ async def quarantine_container(
             approved_by = 'admin'
         
         db = req.app.state.db
-        
-        # Get the container manager instance from app state or create one
-        if not hasattr(req.app.state, 'container_manager'):
-            from daemon.container_manager import ContainerManager
-            req.app.state.container_manager = ContainerManager()
-        
-        container_manager = req.app.state.container_manager
-        
-        # Actually pause and isolate the container
-        quarantine_success = container_manager.quarantine(container_id)
+        resolved = _resolve_container(db, container_id)
+        canonical_container_id = resolved.get('container_id', container_id)
+
+        container_manager = _get_container_manager(req.app.state)
+
+        # Actually pause and isolate the container when runtime manager is available
+        quarantine_success = container_manager.quarantine(canonical_container_id) if container_manager else False
         
         # Update database status
         result = db.db.containers.update_one(
-            {'container_id': container_id},
+            {'container_id': canonical_container_id},
             {
                 '$set': {
                     'status': 'quarantined',
@@ -259,12 +317,12 @@ async def quarantine_container(
         
         return {
             'status': 'success',
-            'container_id': container_id,
+            'container_id': canonical_container_id,
             'quarantine_status': 'quarantined',
             'paused': quarantine_success,
             'reason': reason,
             'approved_by': approved_by,
-            'message': 'Container paused and isolated successfully' if quarantine_success else 'Container marked as quarantined (pause may have failed)'
+            'message': 'Container paused and isolated successfully' if quarantine_success else 'Container marked as quarantined (runtime action unavailable or failed)'
         }
     except Exception as e:
         log.error("Failed to quarantine container", error=str(e), container_id=container_id, exc_info=True)
@@ -280,20 +338,17 @@ async def unquarantine_container(
     """Restore a quarantined container - unpause and reconnect"""
     try:
         db = req.app.state.db
-        
-        # Get the container manager instance
-        if not hasattr(req.app.state, 'container_manager'):
-            from daemon.container_manager import ContainerManager
-            req.app.state.container_manager = ContainerManager()
-        
-        container_manager = req.app.state.container_manager
-        
-        # Actually unpause the container
-        unquarantine_success = container_manager.unquarantine(container_id)
+        resolved = _resolve_container(db, container_id)
+        canonical_container_id = resolved.get('container_id', container_id)
+
+        container_manager = _get_container_manager(req.app.state)
+
+        # Actually unpause the container when runtime manager is available
+        unquarantine_success = container_manager.unquarantine(canonical_container_id) if container_manager else False
         
         # Update container status
         result = db.db.containers.update_one(
-            {'container_id': container_id},
+            {'container_id': canonical_container_id},
             {
                 '$set': {
                     'status': 'running',
@@ -314,10 +369,10 @@ async def unquarantine_container(
         
         return {
             'status': 'success',
-            'container_id': container_id,
+            'container_id': canonical_container_id,
             'quarantine_status': 'unquarantined',
             'unpaused': unquarantine_success,
-            'message': 'Container unpaused and restored successfully' if unquarantine_success else 'Container marked as active (unpause may have failed)'
+            'message': 'Container unpaused and restored successfully' if unquarantine_success else 'Container marked as active (runtime action unavailable or failed)'
         }
     except Exception as e:
         log.error("Failed to unquarantine container", error=str(e), exc_info=True)
@@ -325,6 +380,7 @@ async def unquarantine_container(
 
 
 @router.get("/containers/{container_id}/risk")
+@router.get("/containers/{container_id}/risks")
 async def get_container_risk(container_id: str, request: Request):
     """Get container risk assessment"""
     try:
@@ -332,22 +388,25 @@ async def get_container_risk(container_id: str, request: Request):
         
         # Calculate risk
         risk_level, risk_score = _calculate_container_risk(db, container_id)
+
+        resolved = _resolve_container(db, container_id)
+        canonical_container_id = resolved.get('container_id', container_id)
         
         # Get event counts
         cutoff_24h = datetime.utcnow() - timedelta(hours=24)
         event_count = db.db.security_events.count_documents({
-            'container_id': container_id,
+            'container_id': canonical_container_id,
             'timestamp': {'$gte': cutoff_24h}
         })
         
         critical_events = db.db.security_events.count_documents({
-            'container_id': container_id,
+            'container_id': canonical_container_id,
             'risk_score': {'$gte': 80},
             'timestamp': {'$gte': cutoff_24h}
         })
         
         return {
-            'container_id': container_id,
+            'container_id': canonical_container_id,
             'risk_score': risk_score,
             'risk_level': risk_level,
             'event_count': event_count,
@@ -367,25 +426,31 @@ async def get_container_vulnerabilities(container_id: str, limit: int = 10, requ
     try:
         db = request.app.state.db
         cutoff_24h = datetime.utcnow() - timedelta(hours=24)
+
+        container = _resolve_container(db, container_id) or {}
+        canonical_container_id = container.get('container_id', container_id)
         
         # Get recent alerts (vulnerabilities detected)
         alerts = list(db.db.alerts.find({
-            'container_id': container_id,
+            'container_id': canonical_container_id,
             'timestamp': {'$gte': cutoff_24h}
         }).sort('timestamp', -1).limit(limit))
         
         # Get recent security events
         events = list(db.db.security_events.find({
-            'container_id': container_id,
+            'container_id': canonical_container_id,
             'timestamp': {'$gte': cutoff_24h}
         }).sort('timestamp', -1).limit(limit))
-        
+
         # Compile vulnerability summary
         vulnerability_summary = {
-            'container_id': container_id,
+            'container_id': canonical_container_id,
             'detected_alerts': len(set(str(a['_id']) for a in alerts)),
             'recent_alerts': [],
-            'threat_types': {}
+            'threat_types': {},
+            'runtime_findings': container.get('runtime_findings', []),
+            'baseline_risk_score': int(container.get('risk_score', 0) or 0),
+            'baseline_risk_level': container.get('risk_level', 'LOW')
         }
         
         # Add recent alerts with details
