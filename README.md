@@ -390,12 +390,6 @@ cat /etc/shadow
 python3 -c "import os; os.setuid(0)"
 ```
 
-
-**Verify daemon eBPF attach:**
-```bash
-docker-compose logs daemon | rg -i "eBPF monitor loaded|Failed to load eBPF"
-```
-
 ### Issue: Seeing old test alerts
 
 **Solution:**
