@@ -1,0 +1,260 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: tracingpolicies.security.io
+  annotations:
+    description: "Security policy for real-time threat enforcement"
+spec:
+  group: security.io
+  names:
+    kind: TracingPolicy
+    plural: tracingpolicies
+    singular: tracingpolicy
+    shortNames:
+      - tp
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+              required:
+                - name
+            spec:
+              type: object
+              description: "Policy specification"
+              properties:
+                description:
+                  type: string
+                  description: "Policy description"
+                
+                selector:
+                  type: object
+                  description: "Pod selector for policy matching"
+                  properties:
+                    matchLabels:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "Match pods by labels (AND logic)"
+                    
+                    matchNamespace:
+                      type: string
+                      description: "Match specific namespace"
+                    
+                    matchOwnerKind:
+                      type: string
+                      enum: ["Deployment", "StatefulSet", "DaemonSet", "Job"]
+                      description: "Match by owner resource type"
+                
+                rules:
+                  type: array
+                  description: "Enforcement rules"
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - event
+                    properties:
+                      name:
+                        type: string
+                        description: "Rule name"
+                      
+                      event:
+                        type: string
+                        description: "Event type (file:open, capability:add, network:connect, etc)"
+                      
+                      action:
+                        type: string
+                        enum: ["allow", "block", "log", "alert"]
+                        default: "log"
+                        description: "Action to take"
+                      
+                      severity:
+                        type: string
+                        enum: ["info", "low", "medium", "high", "critical"]
+                        default: "medium"
+                        description: "Severity level"
+                      
+                      condition:
+                        type: string
+                        description: "CEL expression for additional filtering"
+                      
+                      args:
+                        type: object
+                        description: "Rule-specific arguments"
+                        additionalProperties: {}
+                        properties:
+                          paths:
+                            type: array
+                            items:
+                              type: string
+                            description: "File paths for file events"
+                          
+                          capabilities:
+                            type: array
+                            items:
+                              type: string
+                            description: "Capabilities to block/allow"
+                          
+                          hosts:
+                            type: array
+                            items:
+                              type: string
+                            description: "Network hosts to block"
+                          
+                          ports:
+                            type: array
+                            items:
+                              type: integer
+                            description: "Network ports to block"
+                          
+                          patterns:
+                            type: array
+                            items:
+                              type: string
+                            description: "Regex patterns to match"
+                
+                responseActions:
+                  type: array
+                  description: "Actions to take when threat detected"
+                  items:
+                    type: object
+                    properties:
+                      action:
+                        type: string
+                        enum: ["log", "alert", "quarantine", "isolate", "terminate", "snapshot"]
+                        description: "Response action"
+                      
+                      threshold:
+                        type: integer
+                        minimum: 0
+                        maximum: 100
+                        description: "Risk score threshold (0-100)"
+                      
+                      timeout:
+                        type: string
+                        description: "ISO 8601 duration for response action"
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: securityevents.security.io
+  annotations:
+    description: "Recorded security event from enforcement system"
+spec:
+  group: security.io
+  names:
+    kind: SecurityEvent
+    plural: securityevents
+    singular: securityevent
+    shortNames:
+      - se
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                timestamp:
+                  type: string
+                  format: date-time
+                  description: "Event timestamp"
+                
+                pod:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    labels:
+                      type: object
+                      additionalProperties:
+                        type: string
+                    uid:
+                      type: string
+                
+                container:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    pid:
+                      type: integer
+                
+                process:
+                  type: object
+                  properties:
+                    pid:
+                      type: integer
+                    ppid:
+                      type: integer
+                    uid:
+                      type: integer
+                    gid:
+                      type: integer
+                    comm:
+                      type: string
+                    args:
+                      type: string
+                
+                event:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                      description: "Event type (file_open, capability_check, exec, etc)"
+                    
+                    action:
+                      type: string
+                      enum: ["allowed", "blocked"]
+                    
+                    severity:
+                      type: string
+                      enum: ["info", "low", "medium", "high", "critical"]
+                    
+                    riskScore:
+                      type: integer
+                      minimum: 0
+                      maximum: 100
+                
+                details:
+                  type: object
+                  description: "Event-specific details"
+                  additionalProperties:
+                    type: string
+                
+                policy:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    rule:
+                      type: string
