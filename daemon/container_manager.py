@@ -17,7 +17,10 @@ class ContainerManager:
     def __init__(self):
         self.quarantined_containers = set()
         self.os_type = platform.system()  # Windows, Linux, Darwin
-        self.ignored_prefix = os.getenv("IGNORED_CONTAINER_PREFIX", "container-escape-daemon")
+        default_ignored = "container-escape-,major2-daemon,major2-backend,major2-frontend,major2-mongodb"
+        self.ignored_prefixes = [
+            p.strip() for p in os.getenv("IGNORED_CONTAINER_PREFIXES", default_ignored).split(",") if p.strip()
+        ]
         try:
             self.docker_client = docker.from_env()
         except Exception as e:
@@ -46,13 +49,14 @@ class ContainerManager:
                             continue
 
                         baseline_score, findings = self._assess_runtime_risk(container)
+                        is_paused = bool((container.attrs or {}).get("State", {}).get("Paused", False))
                         container_list.append({
                             'container_id': container.short_id,
                             'full_id': container.id,
                             'name': container.name,
                             'image': container.image.tags[0] if container.image.tags else 'unknown',
-                            'status': container.status,
-                            'quarantined': container.id in self.quarantined_containers,
+                            'status': 'quarantined' if is_paused else container.status,
+                            'quarantined': is_paused or container.id in self.quarantined_containers,
                             'risk_level': self._score_to_level(baseline_score),
                             'risk_score': baseline_score,
                             'alert_count': 0,
@@ -93,13 +97,15 @@ class ContainerManager:
 
                         full_id = container_data.get('ID', '')
                         baseline_score, findings = self._assess_runtime_risk_from_cli(full_id, inspect_cache)
+                        inspect_data = inspect_cache.get(full_id, {})
+                        is_paused = bool((inspect_data.get("State") or {}).get("Paused", False))
                         containers.append({
                             'container_id': full_id[:12],
                             'full_id': full_id,
                             'name': container_name,
                             'image': container_data.get('Image', ''),
-                            'status': 'running',
-                            'quarantined': False,
+                            'status': 'quarantined' if is_paused else 'running',
+                            'quarantined': is_paused,
                             'risk_level': self._score_to_level(baseline_score),
                             'risk_score': baseline_score,
                             'alert_count': 0,
@@ -122,7 +128,7 @@ class ContainerManager:
 
     def _is_ignored_container_name(self, name: str) -> bool:
         """Return True when container name should be excluded from processing."""
-        return bool(name) and name.startswith(self.ignored_prefix)
+        return bool(name) and any(name.startswith(prefix) for prefix in self.ignored_prefixes)
 
     def _assess_runtime_risk_from_cli(self, container_id: str, inspect_cache: Dict[str, Dict]) -> tuple[int, List[str]]:
         """Compute runtime risk score when Docker SDK is unavailable using `docker inspect`."""
@@ -202,9 +208,15 @@ class ContainerManager:
             score += 10
             findings.append("Container shares host IPC namespace")
 
-        return min(score, 100), findings
+        # Blend score to avoid collapsing most risky configurations to 100.
+        # Keeps differentiation while preserving severe ranges.
+        if score > 0:
+            score = min(95, int(score * 0.8 + min(len(findings) * 3, 12)))
+        return score, findings
 
     def _score_to_level(self, score: int) -> str:
+        if score <= 0:
+            return "SAFE"
         if score >= 75:
             return "CRITICAL"
         if score >= 50:
@@ -228,21 +240,23 @@ class ContainerManager:
             return True
         
         try:
+            target_id = self._resolve_container_id(container_id)
             # Pause container (hard requirement for quarantine)
-            paused = self._pause_container(container_id)
+            paused = self._pause_container(target_id)
             if not paused:
-                log.error("Quarantine failed: unable to pause container", container_id=container_id)
+                log.error("Quarantine failed: unable to pause container", container_id=target_id)
                 return False
 
             # Disconnect network (best effort; pause already blocks execution)
-            self._disconnect_network(container_id)
+            self._disconnect_network(target_id)
             
             # Add to quarantined set
-            self.quarantined_containers.add(container_id)
+            self.quarantined_containers.add(target_id[:12])
+            self.quarantined_containers.add(target_id)
             
             log.warning(
                 "Container quarantined",
-                container_id=container_id,
+                container_id=target_id,
                 action="paused and isolated"
             )
             return True
@@ -268,15 +282,19 @@ class ContainerManager:
 
         # CLI fallback for environments where SDK is unavailable
         try:
-            result = subprocess.run(
-                ["docker", "pause", container_id],
-                capture_output=True,
-                text=True,
-                timeout=8,
-            )
-            if result.returncode == 0:
-                log.info("Container paused", container_id=container_id, method="docker_cli")
-                return True
+            for _ in range(3):
+                result = subprocess.run(
+                    ["docker", "pause", container_id],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                if result.returncode == 0:
+                    log.info("Container paused", container_id=container_id, method="docker_cli")
+                    return True
+                if "already paused" in (result.stderr or "").lower():
+                    log.info("Container already paused", container_id=container_id, method="docker_cli")
+                    return True
             log.error("Could not pause container via CLI", container_id=container_id, stderr=result.stderr.strip())
             return False
         except Exception as e:
@@ -309,15 +327,29 @@ class ContainerManager:
     
     def unquarantine(self, container_id: str) -> bool:
         """Restore a quarantined container (manual approval required)"""
-        if not self.docker_client:
-            return False
-        
+        target_id = self._resolve_container_id(container_id)
         try:
-            container = self.docker_client.containers.get(container_id)
-            container.unpause()
-            self.quarantined_containers.discard(container_id)
-            log.info("Container unquarantined", container_id=container_id)
-            return True
+            if self.docker_client:
+                container = self.docker_client.containers.get(target_id)
+                container.unpause()
+                self.quarantined_containers.discard(target_id)
+                self.quarantined_containers.discard(target_id[:12])
+                log.info("Container unquarantined", container_id=target_id)
+                return True
+
+            result = subprocess.run(
+                ["docker", "unpause", target_id],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            if result.returncode == 0:
+                self.quarantined_containers.discard(target_id)
+                self.quarantined_containers.discard(target_id[:12])
+                log.info("Container unquarantined", container_id=target_id, method="docker_cli")
+                return True
+            log.error("Failed to unpause container", container_id=target_id, stderr=result.stderr.strip())
+            return False
         except Exception as e:
             log.error(
                 "Failed to unquarantine container",
@@ -325,6 +357,17 @@ class ContainerManager:
                 error=str(e)
             )
             return False
+
+    def _resolve_container_id(self, container_id: str) -> str:
+        """Resolve a possibly-short container id to full id when possible."""
+        if not container_id:
+            return container_id
+        if self.docker_client:
+            try:
+                return self.docker_client.containers.get(container_id).id
+            except Exception:
+                pass
+        return container_id
     
     def get_quarantined_containers(self) -> list:
         """Get list of quarantined containers"""

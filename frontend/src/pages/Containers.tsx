@@ -103,9 +103,18 @@ export default function Containers() {
         return 'bg-orange-500/20 text-orange-200 border border-orange-300/40';
       case 'MEDIUM':
         return 'bg-amber-500/20 text-amber-200 border border-amber-300/40';
+      case 'SAFE':
+        return 'bg-emerald-700/20 text-emerald-200 border border-emerald-300/40';
       default:
         return 'bg-emerald-500/20 text-emerald-200 border border-emerald-300/40';
     }
+  };
+
+  const getRiskLabel = (container: Container) => {
+    if ((container.risk_level === 'LOW' || container.risk_level === 'SAFE') && container.alert_count === 0) {
+      return 'SAFE';
+    }
+    return container.risk_level;
   };
 
   const getStatusColor = (status: string) => {
@@ -164,7 +173,7 @@ export default function Containers() {
                   </td>
                   <td className={`py-4 ${getStatusColor(container.status)}`}>{container.status}</td>
                   <td className="relative py-4 group">
-                    <span className={`cursor-help rounded-full px-3 py-1 text-xs font-semibold ${getRiskColor(container.risk_level)}`}>{container.risk_level}</span>
+                    <span className={`cursor-help rounded-full px-3 py-1 text-xs font-semibold ${getRiskColor(container.risk_level)}`}>{getRiskLabel(container)}</span>
 
                     {hoveredContainer === container.container_id && vulnerabilities[container.container_id] && (
                       <div className="absolute left-0 top-full z-20 mt-2 w-96 rounded-lg border border-slate-700 bg-slate-950 p-4 shadow-xl">

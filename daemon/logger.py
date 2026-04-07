@@ -49,10 +49,17 @@ class ForensicLogger:
             if self.collection is None:
                 log.warning("MongoDB collection not initialized")
                 return False
-            
+            timestamp_ns = int(event.get("timestamp_ns", 0) or 0)
+            event_timestamp = (
+                datetime.utcfromtimestamp(timestamp_ns / 1e9)
+                if timestamp_ns > 0
+                else datetime.utcnow()
+            )
+
             # Add metadata
             event_doc = {
                 **event,
+                'timestamp': event_timestamp,
                 'logged_at': datetime.utcnow(),
                 'retention_until': datetime.utcnow() + timedelta(days=90)
             }

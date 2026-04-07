@@ -14,7 +14,7 @@ cd ../daemon && pip install -r requirements.txt
 docker-compose up -d
 
 # Access dashboard
-# Frontend: http://localhost:3000
+# Frontend: http://localhost:5173
 # Backend: http://localhost:8000/api/health
 # API Docs: http://localhost:8000/docs
 ```
@@ -58,6 +58,26 @@ ebpf/        → Kernel LSM hooks
 - ✅ Auto-quarantine: Containers paused at risk ≥75
 - ✅ Real-time alerts: Dashboard + API endpoints
 - ✅ Full audit logs: All events persisted to MongoDB
+- ✅ Email alert queue with retry/backoff and SMTP integration
+- ✅ API key auth + RBAC roles (viewer/analyst/admin)
+- ✅ Report exports (Markdown, PDF, CSV) and report schedules
+- ✅ Kubernetes-ready manifests with probes/HPA/persistence templates
+
+## API Auth & RBAC
+
+Set these env vars in backend:
+
+- `ADMIN_API_KEY`
+- `ANALYST_API_KEY`
+- `VIEWER_API_KEY`
+
+When any key is configured, protected endpoints require `X-API-Key`.
+
+## Quick Smoke Test
+
+```bash
+sh scripts/smoke-test.sh
+```
 
 ## Requirements
 

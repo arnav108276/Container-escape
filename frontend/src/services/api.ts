@@ -47,8 +47,19 @@ export const apiClient = {
     api.get('/api/reports', { params: { container_id: containerId, limit } }),
   getReport: (reportId: string) => api.get(`/api/reports/${reportId}`),
   getReportMarkdown: (reportId: string) => api.get(`/api/reports/${reportId}/markdown`),
+  getReportPdf: (reportId: string) => api.get(`/api/reports/${reportId}/pdf`, { responseType: 'blob' }),
+  getReportCsv: (reportId: string) => api.get(`/api/reports/${reportId}/csv`, { responseType: 'blob' }),
   generateReport: (containerId: string, hours: number = 24) =>
     api.post('/api/reports/generate', null, { params: { container_id: containerId, hours } }),
+  scheduleReport: (containerId: string, hours: number, cadenceMinutes: number) =>
+    api.post('/api/reports/schedule', null, { params: { container_id: containerId, hours, cadence_minutes: cadenceMinutes } }),
+  runScheduledReports: () => api.post('/api/reports/schedule/run'),
+
+  // Notifications
+  getNotificationConfig: () => api.get('/api/notifications/config'),
+  updateNotificationConfig: (payload: { recipients: string[]; enabled: boolean; min_severity: string }) =>
+    api.post('/api/notifications/config', { recipients: payload.recipients }, { params: { enabled: payload.enabled, min_severity: payload.min_severity } }),
+  processEmailQueue: () => api.post('/api/notifications/queue/process'),
 
   // Admin
   cleanupAllData: () => api.post('/api/admin/cleanup/all'),

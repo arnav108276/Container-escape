@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: container-escape-daemon
+  labels:
+    app: container-escape-daemon
+spec:
+  selector:
+    matchLabels:
+      app: container-escape-daemon
+  template:
+    metadata:
+      labels:
+        app: container-escape-daemon
+    spec:
+      hostPID: true
+      serviceAccountName: default
+      containers:
+        - name: daemon
+          image: ghcr.io/example/container-escape-daemon:latest
+          securityContext:
+            privileged: true
+          env:
+            - name: BACKEND_URL
+              value: http://container-escape-backend:8000
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: MONGODB_URI
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+            - name: lib-modules
+              mountPath: /lib/modules
+              readOnly: true
+            - name: usr-src
+              mountPath: /usr/src
+              readOnly: true
+            - name: sys-kernel-debug
+              mountPath: /sys/kernel/debug
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+        - name: lib-modules
+          hostPath:
+            path: /lib/modules
+        - name: usr-src
+          hostPath:
+            path: /usr/src
+        - name: sys-kernel-debug
+          hostPath:
+            path: /sys/kernel/debug

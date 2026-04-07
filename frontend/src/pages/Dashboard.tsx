@@ -1,194 +1,156 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import apiClient from '../services/api';
-import MetricsDisplay from '../components/MetricsDisplay';
-import EventsDisplay from '../components/EventsDisplay';
-import ContainersDisplay from '../components/ContainersDisplay';
-import AlertsDisplay from '../components/AlertsDisplay';
-import SystemHealthDisplay from '../components/SystemHealthDisplay';
+import { Pie, PieChart, Cell, ResponsiveContainer } from 'recharts';
+import { apiClient } from '../services/api';
 
-type DashboardTab = 'overview' | 'events' | 'containers' | 'alerts' | 'health';
+const RISK_COLORS = {
+  CRITICAL: '#ef4444',
+  HIGH: '#f97316',
+  MEDIUM: '#f59e0b',
+  LOW: '#22c55e',
+  SAFE: '#14b8a6',
+};
 
-interface DashboardMetrics {
-  totalContainers: number;
-  activeAlerts: number;
-  blockedEvents: number;
-  riskyProcesses: number;
-}
+type ContainerRisk = {
+  container_id?: string;
+  name?: string;
+  risk_level?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'SAFE';
+  risk_score?: number;
+  status?: string;
+};
 
-interface SystemOverview {
-  service_status: string;
-  uptime: number;
-  timestamp: string;
-}
+type AlertRow = {
+  alert_id?: string;
+  container_id?: string;
+  event_type?: string;
+  severity?: string;
+  reason?: string;
+  risk_score?: number;
+  timestamp?: string;
+};
 
 function Dashboard() {
-  const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
-  const [overview, setOverview] = useState<SystemOverview | null>(null);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [overviewError, setOverviewError] = useState("");
-  const [lastUpdated, setLastUpdated] = useState("");
+  const [overviewError, setOverviewError] = useState('');
+  const [lastUpdated, setLastUpdated] = useState('');
+  const [containers, setContainers] = useState<ContainerRisk[]>([]);
+  const [alerts, setAlerts] = useState<AlertRow[]>([]);
 
   useEffect(() => {
-    const fetchDashboardData = async (firstLoad = false) => {
-      if (firstLoad) setInitialLoading(true);
-      setOverviewError("");
-
+    const fetchDashboardData = async () => {
       try {
-        const [metricsResponse, overviewResponse] = await Promise.all([
-          apiClient.getDashboardMetrics(),
-          apiClient.getSystemOverview(),
+        setOverviewError('');
+        const [containerResponse, alertResponse] = await Promise.all([
+          apiClient.listContainers(),
+          apiClient.getAlerts(undefined, 20, false),
         ]);
-
-        setMetrics(metricsResponse.data);
-        setOverview(overviewResponse.data);
+        setContainers(containerResponse.data?.containers || []);
+        setAlerts(alertResponse.data?.alerts || []);
         setLastUpdated(new Date().toLocaleTimeString());
       } catch (error) {
-        console.error("Failed to fetch dashboard data:", error);
-        setOverviewError("Unable to fetch live system health. Backend may be unavailable.");
-      } finally {
-        if (firstLoad) setInitialLoading(false);
+        console.error('Failed to fetch dashboard data:', error);
+        setOverviewError('Live telemetry unavailable. Backend may still be starting.');
       }
     };
 
-    fetchDashboardData(true);
-    const interval = setInterval(() => fetchDashboardData(false), 5000);
+    fetchDashboardData();
+    const interval = setInterval(fetchDashboardData, 15000);
     return () => clearInterval(interval);
   }, []);
 
-  const statusBadge = useMemo(() => {
-    if (!overview) return { label: "Unknown", className: "bg-amber-500/20 text-amber-200 border border-amber-300/40" };
-    if (overview.service_status === "healthy") {
-      return { label: "Healthy", className: "bg-emerald-500/20 text-emerald-200 border border-emerald-300/40" };
+  const riskDistribution = useMemo(() => {
+    const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, SAFE: 0 };
+    for (const container of containers) {
+      const level = container.risk_level || 'SAFE';
+      counts[level] += 1;
     }
-    return { label: "Degraded", className: "bg-rose-500/20 text-rose-200 border border-rose-300/40" };
-  }, [overview]);
+    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  }, [containers]);
+
+  const totalContainers = containers.length;
+  const quarantinedContainers = containers.filter((c) => c.status === 'quarantined').length;
+  const criticalContainers = containers.filter((c) => c.risk_level === 'CRITICAL').length;
+  const openAlerts = alerts.length;
 
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-gray-900">
-      {/* Header */}
-      <header className="bg-white dark:bg-gray-800 shadow sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            🛡️ Container Escape Detection & Prevention
-          </h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            Real-time security monitoring and event management
-          </p>
+    <div className="space-y-6">
+      <section className="rounded-xl border border-slate-700 bg-slate-900 p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold text-white">Security Overview</h1>
+            <p className="text-sm text-slate-400">Production-ready runtime security posture</p>
+          </div>
+          <p className="text-xs text-slate-400">Last updated: {lastUpdated || 'waiting...'}</p>
         </div>
-      </header>
+      </section>
 
-      {/* Navigation Tabs */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-20 z-39">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <nav className="flex gap-8" aria-label="Tabs">
-            {(['overview', 'events', 'containers', 'alerts', 'health'] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-1 py-4 border-b-2 font-medium text-sm transition ${
-                  activeTab === tab
-                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
-                }`}
-              >
-                {tab === 'overview' && '📊 Overview'}
-                {tab === 'events' && '📝 Security Events'}
-                {tab === 'containers' && '🐳 Containers'}
-                {tab === 'alerts' && '🔔 Alerts'}
-                {tab === 'health' && '💻 System Health'}
-              </button>
+      {overviewError && (
+        <div className="rounded-xl border border-rose-700 bg-rose-950/50 p-4 text-sm text-rose-200">
+          {overviewError}
+        </div>
+      )}
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
+          <p className="text-xs uppercase text-slate-400">Total Containers</p>
+          <p className="mt-2 text-3xl font-bold text-white">{totalContainers}</p>
+        </div>
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
+          <p className="text-xs uppercase text-slate-400">Quarantined</p>
+          <p className="mt-2 text-3xl font-bold text-rose-300">{quarantinedContainers}</p>
+        </div>
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
+          <p className="text-xs uppercase text-slate-400">Critical Containers</p>
+          <p className="mt-2 text-3xl font-bold text-orange-300">{criticalContainers}</p>
+        </div>
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
+          <p className="text-xs uppercase text-slate-400">Open Alerts</p>
+          <p className="mt-2 text-3xl font-bold text-amber-300">{openAlerts}</p>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-6">
+          <h2 className="mb-4 text-lg font-semibold text-white">Container Risk Distribution</h2>
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={riskDistribution} dataKey="value" innerRadius={70} outerRadius={105} paddingAngle={3}>
+                  {riskDistribution.map((entry) => (
+                    <Cell key={entry.name} fill={RISK_COLORS[entry.name as keyof typeof RISK_COLORS]} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-3 text-sm">
+            {riskDistribution.map((item) => (
+              <div key={item.name} className="flex items-center justify-between rounded-md border border-slate-700 p-2 text-slate-200">
+                <span style={{ color: RISK_COLORS[item.name as keyof typeof RISK_COLORS] }}>{item.name}</span>
+                <span>{item.value}</span>
+              </div>
             ))}
-          </nav>
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Overview Tab */}
-        {activeTab === 'overview' && (
-          <div className="space-y-8">
-            <MetricsDisplay />
-            
-            {/* Quick Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div>
-                <div className="mb-4">
-                  <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-                    ⚠️ Recent Critical Alerts
-                  </h2>
-                </div>
-                <AlertsDisplay />
-              </div>
-              <div>
-                <div className="mb-4">
-                  <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-                    💻 System Status
-                  </h2>
-                </div>
-                <SystemHealthDisplay />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Events Tab */}
-        {activeTab === 'events' && (
-          <div>
-            <EventsDisplay />
-          </div>
-        )}
-
-        {/* Containers Tab */}
-        {activeTab === 'containers' && (
-          <div>
-            <ContainersDisplay />
-          </div>
-        )}
-
-        {/* Alerts Tab */}
-        {activeTab === 'alerts' && (
-          <div>
-            <AlertsDisplay />
-          </div>
-        )}
-
-        {/* Health Tab */}
-        {activeTab === 'health' && (
-          <div>
-            <SystemHealthDisplay />
-          </div>
-        )}
-      </main>
-
-      {/* Footer */}
-      <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div>
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Help</h3>
-              <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                <li><a href="#" className="hover:text-blue-600">Documentation</a></li>
-                <li><a href="#" className="hover:text-blue-600">API Reference</a></li>
-                <li><a href="#" className="hover:text-blue-600">Troubleshooting</a></li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-2">System</h3>
-              <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                <li><a href="#" className="hover:text-blue-600">Policies</a></li>
-                <li><a href="#" className="hover:text-blue-600">Settings</a></li>
-                <li><a href="#" className="hover:text-blue-600">Logs</a></li>
-              </ul>
-            </div>
-            <div className="text-right">
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                © 2026 Container Escape Detection System v1.0.0
-              </p>
-            </div>
           </div>
         </div>
-      </footer>
+
+        <div className="rounded-xl border border-slate-700 bg-slate-900 p-6">
+          <h2 className="mb-4 text-lg font-semibold text-white">Latest Alerts</h2>
+          <div className="space-y-3">
+            {alerts.length === 0 ? (
+              <p className="text-sm text-slate-400">No open alerts.</p>
+            ) : (
+              alerts.slice(0, 6).map((alert) => (
+                <div key={alert.alert_id || `${alert.container_id}-${alert.timestamp}`} className="rounded-md border border-slate-700 bg-slate-950 p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-slate-200">{alert.event_type || 'UNKNOWN'}</p>
+                    <p className="text-xs uppercase text-slate-400">{alert.severity || 'n/a'}</p>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-400">{alert.reason || 'No reason provided'}</p>
+                  <p className="mt-1 text-xs text-cyan-300">Container: {alert.container_id || 'unknown'} | Risk: {alert.risk_score ?? 0}</p>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

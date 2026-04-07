@@ -97,6 +97,8 @@ class EventDaemon:
         self.bpf = None
         self.bpf_event_table = None
         self.runtime_baseline_alerted = set()
+        self.last_notification_process = 0.0
+        self.last_report_schedule_run = 0.0
 
         log.info(
             "Daemon initialized",
@@ -439,6 +441,14 @@ class EventDaemon:
                     self._sync_containers()
                     last_sync = time.time()
 
+                now = time.time()
+                if now - self.last_notification_process > 30:
+                    self._process_notification_queue()
+                    self.last_notification_process = now
+                if now - self.last_report_schedule_run > 60:
+                    self._run_report_schedules()
+                    self.last_report_schedule_run = now
+
                 if ebpf_loaded and self.bpf:
                     self.bpf.ring_buffer_poll(timeout=100)
                 else:
@@ -460,6 +470,25 @@ class EventDaemon:
         self.bpf_event_table = None
         self.runtime_baseline_alerted = set()
         log.info("Daemon stopped")
+
+    def _process_notification_queue(self) -> None:
+        try:
+            self.http_client.post(
+                f"{self.backend_url}/api/notifications/queue/process",
+                timeout=5.0,
+            )
+        except Exception:
+            # Silent best effort to avoid noisy logs every 30s if disabled/misconfigured.
+            pass
+
+    def _run_report_schedules(self) -> None:
+        try:
+            self.http_client.post(
+                f"{self.backend_url}/api/reports/schedule/run",
+                timeout=5.0,
+            )
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

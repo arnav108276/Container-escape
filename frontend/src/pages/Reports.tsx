@@ -32,6 +32,7 @@ export default function Reports() {
   const [markdown, setMarkdown] = useState('');
   const [events24h, setEvents24h] = useState(0);
   const [openAlerts, setOpenAlerts] = useState(0);
+  const [cadenceMinutes, setCadenceMinutes] = useState(60);
 
   const fetchReports = async (initial = false) => {
     if (initial) setLoading(true);
@@ -110,6 +111,36 @@ export default function Reports() {
     }
   };
 
+  const downloadBlob = (blob: Blob, fileName: string) => {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportReport = async (reportId: string, type: 'pdf' | 'csv') => {
+    try {
+      const response = type === 'pdf' ? await apiClient.getReportPdf(reportId) : await apiClient.getReportCsv(reportId);
+      downloadBlob(response.data, `${reportId}.${type}`);
+    } catch (error) {
+      console.error('Failed to export report:', error);
+      alert(`Failed to export ${type.toUpperCase()} report`);
+    }
+  };
+
+  const handleSchedule = async () => {
+    if (!selectedContainer) return;
+    try {
+      await apiClient.scheduleReport(selectedContainer, hours, cadenceMinutes);
+      alert(`Scheduled report every ${cadenceMinutes} minutes.`);
+    } catch (error) {
+      console.error('Failed to schedule report:', error);
+      alert('Failed to schedule report.');
+    }
+  };
+
   return (
     <div className="space-y-8">
       <h1 className="text-4xl font-bold text-cyan-100">Forensic Reports</h1>
@@ -176,6 +207,24 @@ export default function Reports() {
               {generating ? 'Generating...' : 'Generate'}
             </button>
           </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-300">Schedule (minutes)</label>
+            <input
+              type="number"
+              min={5}
+              max={10080}
+              value={cadenceMinutes}
+              onChange={(e) => setCadenceMinutes(Number(e.target.value))}
+              className="w-full rounded border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-white"
+            />
+            <button
+              onClick={handleSchedule}
+              disabled={!selectedContainer}
+              className="mt-2 w-full rounded bg-violet-600 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:bg-slate-600"
+            >
+              Schedule
+            </button>
+          </div>
         </div>
       </section>
 
@@ -194,7 +243,11 @@ export default function Reports() {
                   <h3 className="text-3xl font-bold text-white">{report.container_id.slice(0, 12)}</h3>
                   <p className="text-sm text-slate-400">Generated: {new Date(report.generated_at).toLocaleString()}</p>
                 </div>
-                <button onClick={() => openReport(report.report_id)} className="rounded bg-indigo-600 px-5 py-3 text-base font-semibold text-white hover:bg-indigo-700">View Full Report</button>
+                <div className="flex gap-2">
+                  <button onClick={() => openReport(report.report_id)} className="rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">View</button>
+                  <button onClick={() => exportReport(report.report_id, 'pdf')} className="rounded bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700">PDF</button>
+                  <button onClick={() => exportReport(report.report_id, 'csv')} className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">CSV</button>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3 md:grid-cols-5">

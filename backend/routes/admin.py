@@ -1,8 +1,9 @@
 """Admin utility routes for database management"""
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from datetime import datetime, timedelta
 import structlog
+from auth import require_role
 
 log = structlog.get_logger(__name__)
 
@@ -10,7 +11,7 @@ router = APIRouter()
 
 
 @router.post("/admin/cleanup/all")
-async def cleanup_all_data(request: Request):
+async def cleanup_all_data(request: Request, _auth=Depends(require_role("admin"))):
     """
     DANGER: Delete all alerts, events, and reports.
     Use this to completely reset the database.
@@ -45,7 +46,7 @@ async def cleanup_all_data(request: Request):
 
 
 @router.post("/admin/cleanup/container/{container_id}")
-async def cleanup_container_alerts(container_id: str, request: Request):
+async def cleanup_container_alerts(container_id: str, request: Request, _auth=Depends(require_role("admin"))):
     """Delete all alerts and events for a specific container"""
     try:
         db = request.app.state.db
@@ -74,7 +75,7 @@ async def cleanup_container_alerts(container_id: str, request: Request):
 
 
 @router.post("/admin/cleanup/old-data")
-async def cleanup_old_alerts(hours: int = 24, request: Request = None):
+async def cleanup_old_alerts(hours: int = 24, request: Request = None, _auth=Depends(require_role("admin"))):
     """Delete alerts and events older than specified hours"""
     try:
         db = request.app.state.db

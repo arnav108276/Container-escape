@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import Database
-from routes import admin, alerts, containers, events, reports, websocket
+from routes import admin, alerts, containers, events, reports, websocket, notifications
 
 log = structlog.get_logger(__name__)
 
@@ -56,6 +56,7 @@ app.include_router(events.router, prefix="/api", tags=["events"])
 app.include_router(containers.router, prefix="/api", tags=["containers"])
 app.include_router(reports.router, prefix="/api", tags=["reports"])
 app.include_router(admin.router, prefix="/api", tags=["admin"])
+app.include_router(notifications.router, prefix="/api", tags=["notifications"])
 
 
 def _get_database_status(db: Database) -> str:
@@ -154,6 +155,11 @@ async def health_check(request: Request):
         "database": db_status,
     }
 
+@app.get("/api/health")
+async def api_health_check(request: Request):
+    """Backward-compatible health endpoint for internal probes."""
+    return await health_check(request)
+
 
 @app.get("/ready")
 async def readiness_check(request: Request):
@@ -168,6 +174,12 @@ async def readiness_check(request: Request):
         "uptime_seconds": round(uptime_seconds, 2),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+@app.get("/api/ready")
+async def api_readiness_check(request: Request):
+    """Backward-compatible readiness endpoint for internal probes."""
+    return await readiness_check(request)
 
 
 @app.get("/")
@@ -186,6 +198,21 @@ async def root():
             "health": "/health",
             "ready": "/ready",
         },
+    }
+
+
+@app.get("/api/routes")
+async def list_routes():
+    """List all registered API routes for smoke-testing."""
+    return {
+        "routes": sorted(
+            [
+                {"path": r.path, "methods": sorted(list(r.methods or []))}
+                for r in app.router.routes
+                if getattr(r, "path", "").startswith("/api")
+            ],
+            key=lambda item: item["path"],
+        )
     }
 
 

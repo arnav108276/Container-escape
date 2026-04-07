@@ -6,6 +6,9 @@ from typing import Optional
 import structlog
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import Response
+import csv
+import io
 
 from filtering import is_ignored_container
 
@@ -168,6 +171,97 @@ async def get_report_markdown(report_id: str, request: Request):
     }
 
 
+def _simple_pdf_bytes(lines: list[str]) -> bytes:
+    """
+    Build a minimal single-page PDF without third-party dependencies.
+    This keeps container image lean while still producing a downloadable PDF.
+    """
+    safe_lines = [line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)") for line in lines]
+    stream_parts = ["BT", "/F1 11 Tf", "50 790 Td", "14 TL"]
+    for idx, line in enumerate(safe_lines):
+        op = "Tj" if idx == 0 else "T* Tj"
+        stream_parts.append(f"({line[:150]}) {op}")
+    stream_parts.append("ET")
+    stream = "\n".join(stream_parts).encode("latin-1", errors="ignore")
+
+    objects = []
+    objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+    objects.append(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+    objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>")
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    objects.append(f"<< /Length {len(stream)} >>\nstream\n".encode("latin-1") + stream + b"\nendstream")
+
+    content = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for i, obj in enumerate(objects, start=1):
+        offsets.append(len(content))
+        content.extend(f"{i} 0 obj\n".encode("latin-1"))
+        content.extend(obj)
+        content.extend(b"\nendobj\n")
+
+    xref_offset = len(content)
+    content.extend(f"xref\n0 {len(objects) + 1}\n".encode("latin-1"))
+    content.extend(b"0000000000 65535 f \n")
+    for off in offsets[1:]:
+        content.extend(f"{off:010} 00000 n \n".encode("latin-1"))
+    content.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF".encode("latin-1")
+    )
+    return bytes(content)
+
+
+@router.get("/reports/{report_id}/csv")
+async def get_report_csv(report_id: str, request: Request):
+    """Download report timeline as CSV."""
+    report = await get_report(report_id, request)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["timestamp", "event_type", "risk_score", "description", "container_id"])
+    for event in report.get("timeline", []):
+        writer.writerow(
+            [
+                event.get("timestamp", ""),
+                event.get("event_type", ""),
+                event.get("risk_score", 0),
+                event.get("description", ""),
+                event.get("container_id", report.get("container_id")),
+            ]
+        )
+
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{report_id}.csv"'},
+    )
+
+
+@router.get("/reports/{report_id}/pdf")
+async def get_report_pdf(report_id: str, request: Request):
+    """Download report as a PDF executive summary."""
+    report = await get_report(report_id, request)
+    lines = [
+        f"Forensic Report: {report.get('report_id')}",
+        f"Container: {report.get('container_id')}",
+        f"Generated: {report.get('generated_at')}",
+        f"Window: {report.get('analysis_window_hours')} hours",
+        f"Events: {report.get('event_count')}",
+        f"Critical Events: {report.get('critical_events')}",
+        f"High-risk Events: {report.get('high_risk_events')}",
+        f"Open Alerts: {report.get('open_alert_count')}",
+        "",
+        "Summary:",
+        report.get("summary", ""),
+        "",
+        "Recommendations:",
+    ] + [f"- {rec}" for rec in report.get("recommendations", [])]
+    pdf_bytes = _simple_pdf_bytes([str(line) for line in lines])
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{report_id}.pdf"'},
+    )
+
+
 @router.post("/reports/generate")
 async def generate_report(
     container_id: str = Query(...),
@@ -233,3 +327,45 @@ async def generate_report(
     except Exception as exc:
         log.error("Failed to generate report", error=str(exc), container_id=container_id)
         raise HTTPException(status_code=500, detail="Failed to generate report") from exc
+
+
+@router.post("/reports/schedule")
+async def schedule_report(
+    container_id: str = Query(...),
+    hours: int = Query(24, ge=1, le=168),
+    cadence_minutes: int = Query(60, ge=5, le=10080),
+    request: Request = None,
+):
+    """Create/update scheduled report generation config."""
+    db = request.app.state.db
+    schedule = {
+        "container_id": container_id,
+        "hours": hours,
+        "cadence_minutes": cadence_minutes,
+        "enabled": True,
+        "updated_at": datetime.utcnow(),
+        "next_run_at": datetime.utcnow() + timedelta(minutes=cadence_minutes),
+    }
+    db.db.report_schedules.update_one({"container_id": container_id}, {"$set": schedule}, upsert=True)
+    return {"status": "scheduled", **_to_json_serializable(schedule)}
+
+
+@router.post("/reports/schedule/run")
+async def run_due_schedules(request: Request):
+    """Run due scheduled reports (manual trigger for now)."""
+    db = request.app.state.db
+    now = datetime.utcnow()
+    due = list(db.db.report_schedules.find({"enabled": True, "next_run_at": {"$lte": now}}))
+    generated = 0
+    for schedule in due:
+        await generate_report(
+            container_id=schedule["container_id"],
+            hours=int(schedule.get("hours", 24)),
+            request=request,
+        )
+        db.db.report_schedules.update_one(
+            {"_id": schedule["_id"]},
+            {"$set": {"next_run_at": now + timedelta(minutes=int(schedule.get("cadence_minutes", 60)))}},
+        )
+        generated += 1
+    return {"status": "ok", "generated": generated, "checked": len(due)}

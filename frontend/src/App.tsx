@@ -16,8 +16,11 @@ function App() {
 
   useEffect(() => {
     let ws: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let disposed = false;
 
     const connectWebSocket = () => {
+      if (disposed) return;
       const wsUrl =
         import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws/events";
 
@@ -29,11 +32,9 @@ function App() {
       };
 
       ws.onclose = () => {
-        console.log("WebSocket disconnected");
+        if (disposed) return;
         setIsConnected(false);
-
-        // reconnect automatically
-        setTimeout(connectWebSocket, 3000);
+        reconnectTimer = window.setTimeout(connectWebSocket, 3000);
       };
 
       ws.onerror = (error) => {
@@ -44,6 +45,8 @@ function App() {
     connectWebSocket();
 
     return () => {
+      disposed = true;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
       if (ws) ws.close();
     };
   }, []);
@@ -60,17 +63,6 @@ function App() {
 
           {/* Top Navigation */}
           <Navigation isConnected={isConnected} />
-
-          {/* Connection Banner */}
-          <div
-            className={`text-center py-2 text-sm font-medium ${
-              isConnected ? "bg-emerald-700/80 text-emerald-100" : "bg-rose-700/80 text-rose-100"
-            }`}
-          >
-            {isConnected
-              ? "🟢 Real-time monitoring active"
-              : "🔴 Backend disconnected — attempting reconnect"}
-          </div>
 
           {/* Main Content */}
           <main className="flex-1 px-6 py-8">

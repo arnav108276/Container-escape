@@ -29,6 +29,9 @@ export default function Alerts() {
   const [selectedAlerts, setSelectedAlerts] = useState<Set<string>>(new Set());
   const [acknowledging, setAcknowledging] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [emailRecipients, setEmailRecipients] = useState("");
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [minSeverity, setMinSeverity] = useState("high");
 
   const fetchAlerts = async () => {
     setLoading(true);
@@ -41,6 +44,10 @@ export default function Alerts() {
       setAlerts(alertsResponse.data.alerts || []);
       setSummary(summaryResponse.data || null);
       setSelectedAlerts(new Set());
+      const notificationResponse = await apiClient.getNotificationConfig();
+      setEmailRecipients((notificationResponse.data?.recipients || []).join(", "));
+      setEmailEnabled(Boolean(notificationResponse.data?.enabled));
+      setMinSeverity(notificationResponse.data?.min_severity || "high");
     } catch (error) {
       console.error("Failed to fetch alerts:", error);
       setErrorMessage("Failed to load alerts. Please verify backend connectivity.");
@@ -107,6 +114,21 @@ export default function Alerts() {
     }
   };
 
+  const saveNotificationConfig = async () => {
+    try {
+      await apiClient.updateNotificationConfig({
+        recipients: emailRecipients.split(",").map((email) => email.trim()).filter(Boolean),
+        enabled: emailEnabled,
+        min_severity: minSeverity,
+      });
+      await apiClient.processEmailQueue();
+      alert("Email notification settings saved.");
+    } catch (error) {
+      console.error("Failed to save notification config:", error);
+      alert("Failed to save email notification settings.");
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -124,6 +146,30 @@ export default function Alerts() {
 
       {summary && (
         <>
+          <section className="rounded-xl border border-gray-700 bg-gray-800 p-4">
+            <h2 className="text-lg font-semibold text-white">Email Alerting</h2>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
+              <label className="flex items-center gap-2 text-sm text-gray-300">
+                <input type="checkbox" checked={emailEnabled} onChange={(e) => setEmailEnabled(e.target.checked)} />
+                Enabled
+              </label>
+              <select value={minSeverity} onChange={(e) => setMinSeverity(e.target.value)} className="rounded border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-white">
+                <option value="high">High+</option>
+                <option value="critical">Critical only</option>
+                <option value="medium">Medium+</option>
+              </select>
+              <input
+                value={emailRecipients}
+                onChange={(e) => setEmailRecipients(e.target.value)}
+                placeholder="soc@example.com, devops@example.com"
+                className="md:col-span-2 rounded border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-white"
+              />
+            </div>
+            <button onClick={saveNotificationConfig} className="mt-3 rounded bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700">
+              Save Notification Settings
+            </button>
+          </section>
+
           <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-lg border border-gray-700 bg-gray-800 p-4">
               <p className="text-xs uppercase text-gray-400">Open Alerts</p>
