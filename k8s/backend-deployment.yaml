@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: container-escape-backend
+  labels:
+    app: container-escape-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: container-escape-backend
+  template:
+    metadata:
+      labels:
+        app: container-escape-backend
+    spec:
+      containers:
+        - name: backend
+          image: ghcr.io/example/container-escape-backend:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: MONGODB_URI
+            - name: ADMIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: ADMIN_API_KEY
+            - name: ANALYST_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: ANALYST_API_KEY
+            - name: VIEWER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: VIEWER_API_KEY
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: container-escape-backend
+spec:
+  selector:
+    app: container-escape-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

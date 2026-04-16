@@ -6,6 +6,36 @@ export default function Reports() {
   const { getEffectiveTheme } = useThemeStore();
   const darkMode = getEffectiveTheme() === 'dark';
 
+  const downloadBlob = (blob: Blob, fileName: string) => {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportReport = async (reportId: string, type: 'pdf' | 'csv') => {
+    try {
+      const response = type === 'pdf' ? await apiClient.getReportPdf(reportId) : await apiClient.getReportCsv(reportId);
+      downloadBlob(response.data, `${reportId}.${type}`);
+    } catch (error) {
+      console.error('Failed to export report:', error);
+      alert(`Failed to export ${type.toUpperCase()} report`);
+    }
+  };
+
+  const handleSchedule = async () => {
+    if (!selectedContainer) return;
+    try {
+      await apiClient.scheduleReport(selectedContainer, hours, cadenceMinutes);
+      alert(`Scheduled report every ${cadenceMinutes} minutes.`);
+    } catch (error) {
+      console.error('Failed to schedule report:', error);
+      alert('Failed to schedule report.');
+    }
+  };
+
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} p-6`}>
       <div className="max-w-6xl mx-auto">
@@ -91,6 +121,24 @@ export default function Reports() {
               Choose from Security Summary, Container Inventory, Alert History,
               or Event Details
             </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-slate-300">Schedule (minutes)</label>
+            <input
+              type="number"
+              min={5}
+              max={10080}
+              value={cadenceMinutes}
+              onChange={(e) => setCadenceMinutes(Number(e.target.value))}
+              className="w-full rounded border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-white"
+            />
+            <button
+              onClick={handleSchedule}
+              disabled={!selectedContainer}
+              className="mt-2 w-full rounded bg-violet-600 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:bg-slate-600"
+            >
+              Schedule
+            </button>
           </div>
         </div>
 

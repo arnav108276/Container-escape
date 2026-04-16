@@ -5,10 +5,11 @@ from typing import Optional
 
 import structlog
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Depends
 
 from filtering import is_ignored_container
 from models import Alert
+from auth import require_role
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -43,6 +44,47 @@ def _severity_from_risk(risk_score: int) -> tuple[str, str]:
     return "low", "LOW"
 
 
+def _severity_rank(severity: str) -> int:
+    order = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+    return order.get(str(severity).lower(), 1)
+
+
+def _queue_alert_email(db, alert_doc: dict) -> None:
+    """Queue email notifications for high-severity alerts."""
+    config = db.db.notification_config.find_one({"_id": "email"}) or {}
+    if not config.get("enabled"):
+        return
+
+    min_sev = str(config.get("min_severity", "high")).lower()
+    if _severity_rank(alert_doc.get("severity", "low")) < _severity_rank(min_sev):
+        return
+
+    recipients = config.get("recipients", [])
+    if not recipients:
+        return
+
+    for recipient in recipients:
+        db.db.notification_queue.insert_one(
+            {
+                "status": "queued",
+                "to": recipient,
+                "subject": f"[Container Guardian] {alert_doc.get('severity', '').upper()} alert for {alert_doc.get('container_name') or alert_doc.get('container_id')}",
+                "body": (
+                    f"Container: {alert_doc.get('container_name') or alert_doc.get('container_id')}\n"
+                    f"Severity: {alert_doc.get('severity')}\n"
+                    f"Risk score: {alert_doc.get('risk_score')}\n"
+                    f"Event: {alert_doc.get('event_type')}\n"
+                    f"Reason: {alert_doc.get('reason')}\n"
+                    f"Timestamp: {alert_doc.get('timestamp')}\n"
+                ),
+                "retries": 0,
+                "created_at": datetime.utcnow(),
+                "next_retry_at": datetime.utcnow(),
+                "alert_container_id": alert_doc.get("container_id"),
+            }
+        )
+
+
 @router.post("/alerts")
 async def create_alert(alert: Alert, request: Request):
     """Receive security alert from daemon."""
@@ -64,7 +106,6 @@ async def create_alert(alert: Alert, request: Request):
         existing_unack = db.db.alerts.find_one(
             {
                 "container_id": alert.container_id,
-                "event_type": alert.event_type,
                 "acknowledged": False,
             }
         )
@@ -76,9 +117,10 @@ async def create_alert(alert: Alert, request: Request):
                     "$set": {
                         "timestamp": alert.timestamp,
                         "reason": alert.reason,
-                        "risk_score": alert.risk_score,
+                        "risk_score": max(int(existing_unack.get("risk_score", 0) or 0), alert.risk_score),
                         "risk_category": alert.risk_category or risk_category,
                         "severity": alert.severity or severity,
+                        "event_type": alert.event_type,
                         "metadata": alert.metadata,
                     }
                 },
@@ -87,25 +129,25 @@ async def create_alert(alert: Alert, request: Request):
                 "status": "updated",
                 "container_id": alert.container_id,
                 "timestamp": alert.timestamp.isoformat(),
-                "message": "Alert updated (duplicate event type)",
+                "message": "Alert updated (single open alert per container)",
             }
 
-        db.db.alerts.insert_one(
-            {
-                "timestamp": alert.timestamp,
-                "container_id": alert.container_id,
-                "container_name": container_name,
-                "event_type": alert.event_type,
-                "reason": alert.reason,
-                "risk_score": alert.risk_score,
-                "risk_category": alert.risk_category or risk_category,
-                "severity": alert.severity or severity,
-                "acknowledged": False,
-                "acknowledged_at": None,
-                "acknowledged_by": None,
-                "metadata": alert.metadata,
-            }
-        )
+        alert_doc = {
+            "timestamp": alert.timestamp,
+            "container_id": alert.container_id,
+            "container_name": container_name,
+            "event_type": alert.event_type,
+            "reason": alert.reason,
+            "risk_score": alert.risk_score,
+            "risk_category": alert.risk_category or risk_category,
+            "severity": alert.severity or severity,
+            "acknowledged": False,
+            "acknowledged_at": None,
+            "acknowledged_by": None,
+            "metadata": alert.metadata,
+        }
+        db.db.alerts.insert_one(alert_doc)
+        _queue_alert_email(db, alert_doc)
 
         return {
             "status": "accepted",
@@ -200,7 +242,7 @@ async def get_alert(alert_id: str, request: Request):
 
 
 @router.post("/alerts/{alert_id}/acknowledge")
-async def acknowledge_alert(alert_id: str, request: Request):
+async def acknowledge_alert(alert_id: str, request: Request, _auth=Depends(require_role("analyst"))):
     """Mark a single alert as acknowledged."""
     try:
         db = request.app.state.db
@@ -230,7 +272,7 @@ async def acknowledge_alert(alert_id: str, request: Request):
 
 
 @router.post("/alerts/acknowledge/multiple")
-async def acknowledge_multiple_alerts(request: Request):
+async def acknowledge_multiple_alerts(request: Request, _auth=Depends(require_role("analyst"))):
     """Mark multiple alerts as acknowledged."""
     try:
         db = request.app.state.db
@@ -257,7 +299,7 @@ async def acknowledge_multiple_alerts(request: Request):
 
 
 @router.post("/alerts/acknowledge/all")
-async def acknowledge_all_alerts(request: Request):
+async def acknowledge_all_alerts(request: Request, _auth=Depends(require_role("analyst"))):
     """Mark all unacknowledged alerts as acknowledged."""
     try:
         db = request.app.state.db

@@ -21,6 +21,7 @@ function App() {
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const connectWebSocket = () => {
+      if (disposed) return;
       const wsUrl =
         import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws/events";
 
@@ -32,7 +33,7 @@ function App() {
       };
 
       ws.onclose = () => {
-        console.log("WebSocket disconnected");
+        if (disposed) return;
         setIsConnected(false);
         reconnectTimeout = setTimeout(connectWebSocket, 3000);
       };
@@ -45,6 +46,8 @@ function App() {
     connectWebSocket();
 
     return () => {
+      disposed = true;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
       if (ws) ws.close();
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
     };

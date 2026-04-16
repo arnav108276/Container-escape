@@ -11,7 +11,13 @@ import {
   TrendingUp,
 } from 'lucide-react';
 
-type DashboardTab = 'overview' | 'events' | 'containers' | 'alerts' | 'health';
+const RISK_COLORS = {
+  CRITICAL: '#ef4444',
+  HIGH: '#f97316',
+  MEDIUM: '#f59e0b',
+  LOW: '#22c55e',
+  SAFE: '#14b8a6',
+};
 
 interface DashboardMetrics {
   totalContainers: number;
@@ -21,11 +27,15 @@ interface DashboardMetrics {
   quarantinedContainers?: number;
 }
 
-interface SystemOverview {
-  service_status: string;
-  uptime: number;
-  timestamp: string;
-}
+type AlertRow = {
+  alert_id?: string;
+  container_id?: string;
+  event_type?: string;
+  severity?: string;
+  reason?: string;
+  risk_score?: number;
+  timestamp?: string;
+};
 
 function Dashboard() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');

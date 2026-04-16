@@ -1,16 +1,54 @@
 """Containers API routes"""
 
-from fastapi import APIRouter, Request, HTTPException, Body
+from fastapi import APIRouter, Request, HTTPException, Body, Depends
 from models import QuarantineRequest, Container
 from bson import ObjectId
 import structlog
 from datetime import datetime, timedelta
+import subprocess
 
 from filtering import is_ignored_container
+from auth import require_role
 
 log = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+
+def _quarantine_via_cli(container_id: str) -> bool:
+    """Fallback quarantine implementation when daemon runtime manager is unavailable."""
+    try:
+        pause = subprocess.run(
+            ["docker", "pause", container_id],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if pause.returncode != 0:
+            log.error("Docker pause failed", container_id=container_id, stderr=pause.stderr.strip())
+            return False
+
+        # Network isolation is best-effort; pause is the hard requirement.
+        inspect = subprocess.run(
+            ["docker", "inspect", container_id, "--format", "{{range $k, $_ := .NetworkSettings.Networks}}{{$k}} {{end}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if inspect.returncode == 0 and inspect.stdout:
+            for network_name in [n.strip() for n in inspect.stdout.split(" ") if n.strip()]:
+                if not network_name:
+                    continue
+                subprocess.run(
+                    ["docker", "network", "disconnect", network_name, container_id],
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                )
+        return True
+    except Exception as exc:
+        log.error("CLI quarantine fallback failed", container_id=container_id, error=str(exc))
+        return False
 
 
 def _resolve_container(db, container_id: str) -> dict:
@@ -87,6 +125,8 @@ def _calculate_container_risk(db, container_id: str) -> tuple[str, int]:
         }))
         
         if not alerts and not events:
+            if baseline_score <= 0:
+                return ('SAFE', 0)
             if baseline_score >= 75:
                 return ('CRITICAL', baseline_score)
             if baseline_score >= 50:
@@ -122,10 +162,12 @@ def _calculate_container_risk(db, container_id: str) -> tuple[str, int]:
             
             return (risk_level, final_score)
         
+        if baseline_score <= 0:
+            return ('SAFE', 0)
         return ('LOW', baseline_score)
     except Exception as e:
         log.error("Error calculating container risk", error=str(e))
-        return ('LOW', 0)
+        return ('SAFE', 0)
 
 
 @router.post("/containers/sync")
@@ -274,7 +316,8 @@ async def get_container_status(container_id: str, request: Request):
 @router.post("/containers/{container_id}/quarantine")
 async def quarantine_container(
     container_id: str,
-    req: Request
+    req: Request,
+    _auth=Depends(require_role("analyst")),
 ):
     """Quarantine a container - pause and isolate it"""
     try:
@@ -295,6 +338,8 @@ async def quarantine_container(
 
         # Actually pause and isolate the container when runtime manager is available
         quarantine_success = container_manager.quarantine(canonical_container_id) if container_manager else False
+        if not quarantine_success:
+            quarantine_success = _quarantine_via_cli(canonical_container_id)
         if not quarantine_success:
             log.error(
                 "Container quarantine failed",
@@ -352,7 +397,8 @@ async def quarantine_container(
 async def unquarantine_container(
     container_id: str,
     approved_by: str,
-    req: Request
+    req: Request,
+    _auth=Depends(require_role("analyst")),
 ):
     """Restore a quarantined container - unpause and reconnect"""
     try:
