@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { useThemeStore } from "./store/themeStore";
 
 import Navigation from "./components/Navigation";
 import Sidebar from "./components/Sidebar";
@@ -13,9 +14,11 @@ import "./App.css";
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
+  const { getEffectiveTheme } = useThemeStore();
 
   useEffect(() => {
     let ws: WebSocket | null = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const connectWebSocket = () => {
       const wsUrl =
@@ -31,9 +34,7 @@ function App() {
       ws.onclose = () => {
         console.log("WebSocket disconnected");
         setIsConnected(false);
-
-        // reconnect automatically
-        setTimeout(connectWebSocket, 3000);
+        reconnectTimeout = setTimeout(connectWebSocket, 3000);
       };
 
       ws.onerror = (error) => {
@@ -45,52 +46,63 @@ function App() {
 
     return () => {
       if (ws) ws.close();
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
     };
   }, []);
 
+  const isDark = getEffectiveTheme() === "dark";
+
   return (
     <Router>
-      <div className="flex min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-gray-200">
-
+      <div className="flex h-screen bg-background text-foreground overflow-hidden">
         {/* Sidebar */}
         <Sidebar />
 
         {/* Right Side Layout */}
-        <div className="flex flex-col flex-1">
-
+        <div className="flex flex-col flex-1 overflow-hidden">
           {/* Top Navigation */}
           <Navigation isConnected={isConnected} />
 
-          {/* Connection Banner */}
+          {/* Connection Status Banner */}
           <div
-            className={`text-center py-2 text-sm font-medium ${
-              isConnected ? "bg-emerald-700/80 text-emerald-100" : "bg-rose-700/80 text-rose-100"
+            className={`px-6 py-3 text-sm font-medium flex items-center gap-2 transition-colors ${
+              isConnected
+                ? isDark
+                  ? "bg-emerald-950/40 text-emerald-300"
+                  : "bg-emerald-50 text-emerald-700"
+                : isDark
+                ? "bg-rose-950/40 text-rose-300"
+                : "bg-rose-50 text-rose-700"
             }`}
           >
+            <span
+              className={`inline-block h-2 w-2 rounded-full ${
+                isConnected ? "bg-emerald-500" : "bg-rose-500"
+              }`}
+            />
             {isConnected
-              ? "🟢 Real-time monitoring active"
-              : "🔴 Backend disconnected — attempting reconnect"}
+              ? "Real-time monitoring active"
+              : "Backend disconnected — attempting reconnect"}
           </div>
 
           {/* Main Content */}
-          <main className="flex-1 px-6 py-8">
-
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/alerts" element={<Alerts />} />
-              <Route path="/containers" element={<Containers />} />
-              <Route path="/reports" element={<Reports />} />
-            </Routes>
-
+          <main className="flex-1 overflow-auto">
+            <div className="px-6 py-8">
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/alerts" element={<Alerts />} />
+                <Route path="/containers" element={<Containers />} />
+                <Route path="/reports" element={<Reports />} />
+              </Routes>
+            </div>
           </main>
 
           {/* Footer */}
-          <footer className="text-center text-sm text-gray-500 py-4 border-t border-gray-800">
-            Container Escape Detection System • Real-Time Security Monitoring
+          <footer className="px-6 py-4 border-t border-border text-xs text-muted-foreground flex items-center justify-between">
+            <div>Container Escape Detection System • Real-Time Security Monitoring</div>
+            <div>v1.0.0 • Enterprise Edition</div>
           </footer>
-
         </div>
-
       </div>
     </Router>
   );

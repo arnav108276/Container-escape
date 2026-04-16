@@ -4,6 +4,7 @@ FastAPI backend for Container Escape Detection System
 
 from contextlib import asynccontextmanager
 from datetime import datetime
+import asyncio
 import os
 
 import structlog
@@ -28,10 +29,21 @@ async def lifespan(app: FastAPI):
 
     app.state.db = db
     app.state.started_at = datetime.utcnow()
+    if connected:
+        app.state.report_scheduler_task = asyncio.create_task(reports.run_report_scheduler(app))
+    else:
+        app.state.report_scheduler_task = None
 
     yield
 
     log.info("Backend shutting down")
+    if app.state.report_scheduler_task:
+        app.state.report_scheduler_task.cancel()
+        try:
+            await app.state.report_scheduler_task
+        except asyncio.CancelledError:
+            pass
+
     if hasattr(app.state, "db"):
         app.state.db.close()
 
@@ -43,14 +55,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Configure CORS with restricted origins for production
+allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    max_age=3600,
 )
 
+# Include protected routes
 app.include_router(alerts.router, prefix="/api", tags=["alerts"])
 app.include_router(events.router, prefix="/api", tags=["events"])
 app.include_router(containers.router, prefix="/api", tags=["containers"])
@@ -141,6 +158,38 @@ async def websocket_endpoint(ws: WebSocket):
             websocket.manager.disconnect(ws)
         except ValueError:
             pass
+
+
+@app.get("/api/metrics")
+async def get_metrics(request: Request):
+    """Get metrics - alias for dashboard/metrics endpoint."""
+    db = request.app.state.db
+    try:
+        metrics = db.get_dashboard_metrics()
+    except Exception as exc:
+        log.error("Failed to query metrics", error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to query metrics") from exc
+    
+    if not metrics:
+        return {
+            "totalContainers": 0,
+            "activeAlerts": 0,
+            "blockedEvents": 0,
+            "riskyProcesses": 0,
+        }
+    return metrics
+
+
+@app.get("/api/health")
+async def api_health_check(request: Request):
+    """Health check endpoint for API - alias for /health."""
+    db_status = _get_database_status(request.app.state.db)
+    return {
+        "status": "healthy" if db_status == "connected" else "degraded",
+        "timestamp": datetime.utcnow().isoformat(),
+        "service": "container-escape-detection-backend",
+        "database": db_status,
+    }
 
 
 @app.get("/health")

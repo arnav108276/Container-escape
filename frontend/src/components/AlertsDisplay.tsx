@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useSystemMetrics, Alert } from '../store';
+import { Card, CardHeader, CardContent } from '@/components/ui/card';
 
 const getSeverityColor = (severity: string) => {
   switch (severity) {
@@ -88,31 +89,31 @@ const AlertsDisplay: React.FC = () => {
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
-      <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+    <Card className="bg-white dark:bg-gray-800 rounded-lg shadow">
+      <CardHeader className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-gray-900 dark:text-white">
             🔔 Security Alerts ({filteredAlerts.length})
           </h2>
+          <div className="flex gap-2">
+            {(['all', 'new', 'acknowledged', 'resolved'] as const).map((status) => (
+              <button
+                key={status}
+                onClick={() => setFilter(status)}
+                className={`px-4 py-2 rounded text-sm font-medium transition ${
+                  filter === status
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-300'
+                }`}
+              >
+                {status.charAt(0).toUpperCase() + status.slice(1)}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="flex gap-2">
-          {(['all', 'new', 'acknowledged', 'resolved'] as const).map((status) => (
-            <button
-              key={status}
-              onClick={() => setFilter(status)}
-              className={`px-4 py-2 rounded text-sm font-medium transition ${
-                filter === status
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-300'
-              }`}
-            >
-              {status.charAt(0).toUpperCase() + status.slice(1)}
-            </button>
-          ))}
-        </div>
-      </div>
+      </CardHeader>
 
-      <div className="space-y-4 p-6">
+      <CardContent className="space-y-4 p-6">
         {filteredAlerts.map((alert: Alert) => (
           <div
             key={alert.id}
@@ -158,7 +159,7 @@ const AlertsDisplay: React.FC = () => {
             </div>
           </div>
         ))}
-      </div>
+      </CardContent>
 
       {filteredAlerts.length === 0 && (
         <div className="text-center py-12">
@@ -167,7 +168,7 @@ const AlertsDisplay: React.FC = () => {
           </p>
         </div>
       )}
-    </div>
+    </Card>
   );
 };
 

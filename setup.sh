@@ -3,33 +3,36 @@
 
 set -e
 
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_ROOT"
+
 echo "🚀 Container Escape Detection - Setup"
 echo "========================================"
 
-# Install backend dependencies
 echo "📦 Installing backend dependencies..."
-cd backend
-pip install -r requirements.txt
-cd ..
+if [ ! -d ".venv-wsl" ]; then
+  python3 -m venv .venv-wsl
+fi
+source .venv-wsl/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install fastapi==0.104.1 "uvicorn[standard]==0.24.0" pymongo==4.6.1 pydantic==2.5.0 python-dotenv==1.0.0 structlog==24.1.0 python-multipart==0.0.6 httpx==0.25.2
 
-# Install frontend dependencies  
-echo "📦 Installing frontend dependencies..."
 cd frontend
 npm install
-cd ..
+cd "$PROJECT_ROOT"
 
-# Install daemon dependencies
 echo "📦 Installing daemon dependencies..."
 cd daemon
-pip install -r requirements.txt
-cd ..
+source "$PROJECT_ROOT/.venv-wsl/bin/activate"
+python -m pip install -r requirements.txt
+cd "$PROJECT_ROOT"
 
 echo ""
 echo "✅ Setup complete!"
 echo ""
 echo "📝 Next steps:"
-echo "   Local development: docker-compose up -d"
-echo "   Or start services individually:"
-echo "   - Backend:  cd backend && python -m uvicorn main:app --reload"
-echo "   - Frontend: cd frontend && npm run dev"
-echo "   - Daemon:   cd daemon && python daemon_modular.py (needs root)"
+echo "   Run locally in WSL:"
+echo "     source .venv-wsl/bin/activate"
+echo "     cd backend && uvicorn main:app --host 0.0.0.0 --port 8000"
+echo "     cd frontend && npm run dev -- --host 0.0.0.0 --port 5173"
+echo "     cd daemon && sudo python daemon_modular.py"

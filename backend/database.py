@@ -42,6 +42,7 @@ class Database:
             'alerts': ['timestamp', 'container_id'],
             'containers': ['container_id'],
             'forensic_reports': ['container_id', 'generated_at'],
+            'forensic_report_schedules': ['schedule_id', 'next_run', 'enabled', 'container_id'],
             'rules': ['rule_id', 'enabled']
         }
         

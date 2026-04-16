@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     libbpf-dev \
     bpfcc-tools \
     python3-bpfcc \
+    libbpfcc-dev \
     linux-libc-dev \
     ca-certificates \
     gnupg \
@@ -24,15 +25,12 @@ RUN mkdir -p /etc/apt/keyrings && \
     apt-get update && apt-get install -y docker-ce-cli && \
     rm -rf /var/lib/apt/lists/*
 
-# Install uv using pip
-RUN pip install --no-cache-dir uv
-
 # Copy project files
-COPY pyproject.toml .
 COPY . .
 
-# Install dependencies using uv
-RUN uv pip install -e . --system
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir httpx fastapi pydantic python-dotenv pymongo motor structlog numba pytest numpy bcc
 
 # Run daemon
-CMD ["uv", "run", "python", "daemon.py"]
+CMD ["python", "daemon_modular.py"]

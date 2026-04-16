@@ -47,8 +47,18 @@ export const apiClient = {
     api.get('/api/reports', { params: { container_id: containerId, limit } }),
   getReport: (reportId: string) => api.get(`/api/reports/${reportId}`),
   getReportMarkdown: (reportId: string) => api.get(`/api/reports/${reportId}/markdown`),
+  exportReport: (reportId: string, format: 'json' | 'csv' | 'markdown') =>
+    api.get(`/api/reports/${reportId}/export`, { params: { format }, responseType: 'blob' }),
   generateReport: (containerId: string, hours: number = 24) =>
     api.post('/api/reports/generate', null, { params: { container_id: containerId, hours } }),
+  listReportSchedules: (containerId?: string) =>
+    api.get('/api/reports/schedules', { params: { container_id: containerId } }),
+  createReportSchedule: (schedule: any) =>
+    api.post('/api/reports/schedules', schedule),
+  deleteReportSchedule: (scheduleId: string) =>
+    api.delete(`/api/reports/schedules/${scheduleId}`),
+  runReportSchedule: (scheduleId: string) =>
+    api.post(`/api/reports/schedules/${scheduleId}/run`),
 
   // Admin
   cleanupAllData: () => api.post('/api/admin/cleanup/all'),

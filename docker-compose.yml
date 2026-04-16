@@ -3,11 +3,12 @@ version: '3.9'
 services:
   mongodb:
     image: mongo:7.0
+    container_name: container-security-mongodb
     ports:
       - "27017:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:-secure-password-change-this}
     volumes:
       - mongodb_data:/data/db
     healthcheck:
@@ -15,40 +16,77 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    networks:
+      - security-network
+    restart: unless-stopped
+    mem_limit: 1g
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      cache_from:
+        - container-escape-backend:latest
+    container_name: container-security-backend
     ports:
       - "8000:8000"
     environment:
-      MONGODB_URI: mongodb://admin:password@mongodb:27017
-      BACKEND_URL: http://localhost:8000
-      LOG_LEVEL: INFO
+      MONGODB_URI: mongodb://admin:${MONGODB_PASSWORD:-secure-password-change-this}@mongodb:27017
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:8000}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      ACCESS_TOKEN_EXPIRE: ${ACCESS_TOKEN_EXPIRE:-60}
+      # Email configuration
+      SMTP_SERVER: ${SMTP_SERVER:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      # eBPF configuration
+      ALERT_THRESHOLD: ${ALERT_THRESHOLD:-40}
+      EBPF_SOURCE_FILE: /ebpf/monitor.c
     depends_on:
       mongodb:
         condition: service_healthy
-    command: uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - security-network
+    restart: unless-stopped
+    mem_limit: 1g
+    healthcheck:
+      test: curl -f http://127.0.0.1:8000/api/health || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   daemon:
     build:
       context: ./daemon
       dockerfile: Dockerfile
+      cache_from:
+        - container-escape-daemon:latest
+    container_name: container-security-daemon
     privileged: true
     pid: host
+    ipc: host
+    network_mode: host
     environment:
-      MONGODB_URI: mongodb://admin:password@mongodb:27017
-      BACKEND_URL: http://backend:8000
-      LOG_LEVEL: INFO
-      ALERT_THRESHOLD: 40
+      MONGODB_URI: mongodb://admin:${MONGODB_PASSWORD:-secure-password-change-this}@localhost:27017
+      BACKEND_URL: http://localhost:8000
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ALERT_THRESHOLD: ${ALERT_THRESHOLD:-40}
       EBPF_SOURCE_FILE: /ebpf/monitor.c
     depends_on:
-      - mongodb
-      - backend
-    command: uv run python daemon.py
+      backend:
+        condition: service_healthy
+    command: python daemon_modular.py
     volumes:
       - ./daemon:/app
       - ./ebpf:/ebpf:ro
@@ -56,16 +94,45 @@ services:
       - /lib/modules:/lib/modules:ro
       - /usr/src:/usr/src:ro
       - /sys/kernel/debug:/sys/kernel/debug
+    restart: unless-stopped
+    mem_limit: 1g
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - SYS_PTRACE
+      - NET_ADMIN
+      - DAC_OVERRIDE
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      cache_from:
+        - container-escape-frontend:latest
+    container_name: container-security-frontend
     ports:
       - "5173:80"
     environment:
-      VITE_API_URL: http://localhost:8000
-      VITE_WS_URL: ws://localhost:8000
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:8000}
+    depends_on:
+      - backend
+    networks:
+      - security-network
+    restart: unless-stopped
+    mem_limit: 512m
+    healthcheck:
+      test: wget --quiet --tries=1 --spider http://127.0.0.1/index.html || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   mongodb_data:
+    driver: local
+
+networks:
+  security-network:
+    driver: bridge
+

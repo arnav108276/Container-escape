@@ -62,10 +62,11 @@ struct {
     __uint(max_entries, 10);
     __type(key, __u32);
     __type(value, __u32);
-} config SEC(".maps");
+} config_map SEC(".maps");
 
 #define CONFIG_LSM_ENABLED 0
 #define CONFIG_LOG_LEVEL 1
+#define EPERM 1
 
 /* ============================================================================
  * EVENT STRUCTURES
@@ -79,7 +80,7 @@ struct file_access_event {
     __u32 gid;
     __u8 event_type;      /* 1: file_open, 2: file_read, etc */
     __u8 action;          /* 0: allowed, 1: blocked */
-    char filepath[256];
+    char filepath[64];
     char comm[16];
 };
 
@@ -97,8 +98,8 @@ struct exec_event {
     __u32 pid;
     __u32 ppid;
     __u32 uid;
-    char filename[256];
-    char args[512];
+    char filename[64];
+    char args[128];
     __u8 action;
     char comm[16];
 };
@@ -165,19 +166,20 @@ static __always_inline int is_path_blocked(const char *filepath) {
         }
         
         /* Compare paths - kernel string comparison */
-        char tmp[256] = {};
-        safe_strncpy(tmp, filepath, 256);
-        
+        char tmp[64] = {};
+        safe_strncpy(tmp, filepath, 64);
+
         if (!__builtin_strcmp(tmp, entry->path)) {
             return 1;  /* BLOCK */
         }
     }
-    
+
     return 0;  /* ALLOW */
 }
 
-/*
+/* ============================================================================
  * Submit event to ring buffer for userspace processing
+ * ============================================================================
  */
 static __always_inline void submit_event(void *data, __u32 size) {
     bpf_ringbuf_output(&events, data, size, 0);
@@ -218,7 +220,7 @@ int BPF_PROG(lsm_file_open, struct file *file) {
     bpf_get_current_comm(&event.comm, sizeof(event.comm));
     
     /* Get file path - kernel string read */
-    struct filename *f = file->f_path.dentry->d_name.name;
+    const char *f = (const char *)file->f_path.dentry->d_name.name;
     if (f) {
         safe_strncpy(event.filepath, f, 256);
     }
