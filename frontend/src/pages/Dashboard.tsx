@@ -37,6 +37,14 @@ type AlertRow = {
   timestamp?: string;
 };
 
+type DashboardTab = 'overview' | 'events' | 'containers' | 'alerts' | 'health';
+
+interface SystemOverview {
+  service_status: 'healthy' | 'degraded';
+  uptime: number;
+  timestamp: string;
+}
+
 function Dashboard() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);

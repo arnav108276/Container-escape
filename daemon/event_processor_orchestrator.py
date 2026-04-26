@@ -10,11 +10,19 @@ from datetime import datetime
 from collections import deque
 
 from ring_buffer_reader import RingBufferReader, SecurityEvent
-from risk_scorer_enhanced import EnhancedRiskScorer
+from risk_scorer_enhanced import EnhancedRiskScorer, SecurityEvent as ScoringEvent, EventType
 from backend_api_client import BackendAPIClient
 from container_manager import ContainerManager
 
 logger = logging.getLogger(__name__)
+
+EVENT_TYPE_MAP = {
+    'file_access': EventType.FILE_OPEN,
+    'privilege_escalation': EventType.SETUID,
+    'network': EventType.NETWORK,
+    'capability': EventType.CAPABILITY,
+    'mount': EventType.MOUNT,
+}
 
 
 class EventProcessorOrchestrator:
@@ -103,7 +111,21 @@ class EventProcessorOrchestrator:
                     event_dict['container_info'] = container_info
             
             # Score the event
-            risk_score = self.risk_scorer.score_event(event_dict)
+            scoring_event = ScoringEvent(
+                timestamp=datetime.utcnow(),
+                pid=int(event_dict.get('pid', 0) or 0),
+                uid=int(event_dict.get('uid', 0) or 0),
+                gid=int(event_dict.get('gid', 0) or 0),
+                event_type=EVENT_TYPE_MAP.get(event_dict.get('event_type'), EventType.FILE_OPEN),
+                context=event_dict.get('filepath') or event_dict.get('event_type') or 'unknown',
+                was_blocked=False,
+            )
+            score_result = self.risk_scorer.score_event(scoring_event)
+            if isinstance(score_result, tuple):
+                risk_score, risk_level = score_result
+                event_dict['risk_level'] = str(risk_level).upper()
+            else:
+                risk_score = float(score_result)
             event_dict['risk_score'] = risk_score
             
             # Check if alert is needed
@@ -115,8 +137,8 @@ class EventProcessorOrchestrator:
                 if self.on_alert:
                     self.on_alert(alert)
             
-            # Check if risk threshold exceeded
-            if risk_score >= 75:
+            # Auto-quarantine threshold: high and critical only
+            if risk_score >= 50:
                 container_id = event_dict.get('container_id')
                 if self.on_risk_threshold:
                     self.on_risk_threshold(container_id, risk_score)

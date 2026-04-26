@@ -9,9 +9,21 @@ const api: AxiosInstance = axios.create({
   },
 });
 
+api.interceptors.request.use((config) => {
+  const token = window.localStorage.getItem('access_token');
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 export const apiClient = {
   get: (url: string, config?: any) => api.get(url, config),
   post: (url: string, data?: any, config?: any) => api.post(url, data, config),
+  delete: (url: string, config?: any) => api.delete(url, config),
+  login: (username: string, password: string) => api.post('/api/auth/login', { username, password }),
+  me: () => api.get('/api/auth/me'),
 
   // Dashboard
   getDashboardMetrics: () => api.get('/api/dashboard/metrics'),
@@ -27,6 +39,17 @@ export const apiClient = {
     api.post('/api/alerts/acknowledge/multiple', { alert_ids: alertIds, acknowledged_by: acknowledgedBy }),
   acknowledgeAllAlerts: (acknowledgedBy: string = 'user') =>
     api.post('/api/alerts/acknowledge/all', { acknowledged_by: acknowledgedBy }),
+  getNotificationConfig: () => api.get('/api/notifications/config'),
+  updateNotificationConfig: (payload: { recipients: string[]; enabled: boolean; min_severity: string }) =>
+    api.post('/api/notifications/config', payload, {
+      params: {
+        enabled: payload.enabled,
+        min_severity: payload.min_severity,
+        recipients: payload.recipients.join(','),
+      },
+    }),
+  processEmailQueue: (batchSize: number = 50) =>
+    api.post('/api/notifications/queue/process', null, { params: { batch_size: batchSize } }),
 
   // Events
   getEvents: (containerId?: string, hours: number = 24, limit: number = 1000) =>
@@ -49,8 +72,20 @@ export const apiClient = {
   getReportMarkdown: (reportId: string) => api.get(`/api/reports/${reportId}/markdown`),
   exportReport: (reportId: string, format: 'json' | 'csv' | 'markdown') =>
     api.get(`/api/reports/${reportId}/export`, { params: { format }, responseType: 'blob' }),
+  getReportPdf: (reportId: string) =>
+    api.get(`/api/reports/${reportId}/export`, { params: { format: 'pdf' }, responseType: 'blob' }),
+  getReportCsv: (reportId: string) =>
+    api.get(`/api/reports/${reportId}/export`, { params: { format: 'csv' }, responseType: 'blob' }),
   generateReport: (containerId: string, hours: number = 24) =>
     api.post('/api/reports/generate', null, { params: { container_id: containerId, hours } }),
+  scheduleReport: (containerId: string, hours: number, cadenceMinutes: number) =>
+    api.post('/api/reports/schedules', {
+      container_id: containerId,
+      hours,
+      cadence_minutes: cadenceMinutes,
+      format: 'json',
+      enabled: true,
+    }),
   listReportSchedules: (containerId?: string) =>
     api.get('/api/reports/schedules', { params: { container_id: containerId } }),
   createReportSchedule: (schedule: any) =>

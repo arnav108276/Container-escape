@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { useThemeStore } from "./store/themeStore";
+import { apiClient } from "./services/api";
+import { Card } from "./components/ui/card";
+import { Button } from "./components/ui/button";
 
 import Navigation from "./components/Navigation";
 import Sidebar from "./components/Sidebar";
@@ -14,11 +17,44 @@ import "./App.css";
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
-  const { getEffectiveTheme } = useThemeStore();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("admin1234");
+  const [authError, setAuthError] = useState("");
+  const { getEffectiveTheme, theme } = useThemeStore();
+
+  useEffect(() => {
+    const effective = getEffectiveTheme();
+    const root = window.document.documentElement;
+    root.classList.toggle("dark", effective === "dark");
+    window.localStorage.setItem("theme", effective);
+  }, [theme, getEffectiveTheme]);
+
+  useEffect(() => {
+    const validateToken = async () => {
+      try {
+        const token = window.localStorage.getItem("access_token");
+        if (!token) {
+          setIsAuthenticated(false);
+          return;
+        }
+        await apiClient.me();
+        setIsAuthenticated(true);
+      } catch {
+        window.localStorage.removeItem("access_token");
+        setIsAuthenticated(false);
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    validateToken();
+  }, []);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
 
     const connectWebSocket = () => {
       if (disposed) return;
@@ -47,13 +83,44 @@ function App() {
 
     return () => {
       disposed = true;
-      if (reconnectTimer) window.clearTimeout(reconnectTimer);
       if (ws) ws.close();
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
     };
   }, []);
 
   const isDark = getEffectiveTheme() === "dark";
+
+  const handleLogin = async () => {
+    try {
+      setAuthError("");
+      const response = await apiClient.login(username, password);
+      const token = response.data?.access_token;
+      if (!token) throw new Error("missing token");
+      window.localStorage.setItem("access_token", token);
+      setIsAuthenticated(true);
+    } catch {
+      setAuthError("Login failed. Check credentials or backend auth settings.");
+    }
+  };
+
+  if (authLoading) {
+    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background px-4">
+        <Card className="w-full max-w-md p-6 space-y-4">
+          <h1 className="text-2xl font-bold">Enterprise Login</h1>
+          <p className="text-sm text-muted-foreground">Use seeded admin credentials first, then rotate password via API policy.</p>
+          <input className="w-full rounded-md border border-border bg-background p-2" value={username} onChange={(e) => setUsername(e.target.value)} />
+          <input className="w-full rounded-md border border-border bg-background p-2" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          {authError && <p className="text-sm text-red-500">{authError}</p>}
+          <Button className="w-full" onClick={handleLogin}>Sign in</Button>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <Router>

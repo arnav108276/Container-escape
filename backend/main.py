@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import Database
-from routes import admin, alerts, containers, events, reports, websocket, notifications
+from routes import admin, alerts, auth, containers, events, reports, websocket, notifications
 
 log = structlog.get_logger(__name__)
 
@@ -74,6 +74,7 @@ app.include_router(containers.router, prefix="/api", tags=["containers"])
 app.include_router(reports.router, prefix="/api", tags=["reports"])
 app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(notifications.router, prefix="/api", tags=["notifications"])
+app.include_router(auth.router, prefix="/api", tags=["auth"])
 
 
 def _get_database_status(db: Database) -> str:
@@ -179,18 +180,6 @@ async def get_metrics(request: Request):
             "riskyProcesses": 0,
         }
     return metrics
-
-
-@app.get("/api/health")
-async def api_health_check(request: Request):
-    """Health check endpoint for API - alias for /health."""
-    db_status = _get_database_status(request.app.state.db)
-    return {
-        "status": "healthy" if db_status == "connected" else "degraded",
-        "timestamp": datetime.utcnow().isoformat(),
-        "service": "container-escape-detection-backend",
-        "database": db_status,
-    }
 
 
 @app.get("/health")

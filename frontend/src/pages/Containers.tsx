@@ -72,10 +72,12 @@ export default function Containers() {
 
     try {
       const response = await apiClient.quarantineContainer(containerId, 'Manual quarantine', 'admin');
-      const { paused } = response.data || {};
+      const { paused, quarantine_status: quarantineStatus } = response.data || {};
       await fetchContainers();
 
-      if (paused) {
+      if (quarantineStatus === 'already_quarantined') {
+        setSuccessMessage(`Container ${containerId.slice(0, 12)} is already quarantined.`);
+      } else if (paused) {
         setSuccessMessage(`Container ${containerId.slice(0, 12)} quarantined and execution paused.`);
       } else {
         setErrorMessage(`Container ${containerId.slice(0, 12)} was marked quarantined, but runtime pause failed.`);
