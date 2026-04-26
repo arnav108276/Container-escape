@@ -107,7 +107,7 @@ async def cleanup_old_alerts(hours: int = 24, request: Request = None, _auth=Dep
 
 
 @router.get("/admin/stats")
-async def get_stats(request: Request):
+async def get_stats(request: Request, _auth=Depends(require_role("admin"))):
     """Get database statistics"""
     try:
         db = request.app.state.db

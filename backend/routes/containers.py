@@ -333,6 +333,16 @@ async def quarantine_container(
         db = req.app.state.db
         resolved = _resolve_container(db, container_id)
         canonical_container_id = resolved.get('container_id', container_id)
+        if resolved and bool(resolved.get('quarantined', False)):
+            return {
+                'status': 'success',
+                'container_id': canonical_container_id,
+                'quarantine_status': 'already_quarantined',
+                'paused': True,
+                'reason': resolved.get('quarantine_reason', reason),
+                'approved_by': resolved.get('quarantined_by', approved_by),
+                'message': 'Container is already quarantined'
+            }
 
         container_manager = _get_container_manager(req.app.state)
 

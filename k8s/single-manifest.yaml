@@ -1,0 +1,264 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: container-escape
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: container-escape-secrets
+  namespace: container-escape
+type: Opaque
+stringData:
+  MONGODB_URI: "mongodb://admin:password@container-escape-mongodb:27017"
+  ADMIN_API_KEY: "change-me-admin"
+  ANALYST_API_KEY: "change-me-analyst"
+  VIEWER_API_KEY: "change-me-viewer"
+  SMTP_HOST: "smtp.gmail.com"
+  SMTP_PORT: "587"
+  SMTP_USERNAME: ""
+  SMTP_PASSWORD: ""
+  SMTP_FROM_EMAIL: "noreply@container-guardian.local"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: container-escape-mongodb-pvc
+  namespace: container-escape
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: container-escape-mongodb
+  namespace: container-escape
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: container-escape-mongodb
+  template:
+    metadata:
+      labels:
+        app: container-escape-mongodb
+    spec:
+      containers:
+        - name: mongodb
+          image: mongo:7.0
+          ports:
+            - containerPort: 27017
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+          livenessProbe:
+            tcpSocket:
+              port: 27017
+            initialDelaySeconds: 20
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: container-escape-mongodb-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: container-escape-mongodb
+  namespace: container-escape
+spec:
+  selector:
+    app: container-escape-mongodb
+  ports:
+    - port: 27017
+      targetPort: 27017
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: container-escape-backend
+  namespace: container-escape
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: container-escape-backend
+  template:
+    metadata:
+      labels:
+        app: container-escape-backend
+    spec:
+      containers:
+        - name: backend
+          image: ghcr.io/example/container-escape-backend:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: MONGODB_URI
+            - name: ADMIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: ADMIN_API_KEY
+            - name: ANALYST_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: ANALYST_API_KEY
+            - name: VIEWER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: VIEWER_API_KEY
+            - name: SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: SMTP_HOST
+            - name: SMTP_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: SMTP_PORT
+            - name: SMTP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: SMTP_USERNAME
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: SMTP_PASSWORD
+            - name: SMTP_FROM_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: container-escape-secrets
+                  key: SMTP_FROM_EMAIL
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: container-escape-backend
+  namespace: container-escape
+spec:
+  selector:
+    app: container-escape-backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: container-escape-frontend
+  namespace: container-escape
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: container-escape-frontend
+  template:
+    metadata:
+      labels:
+        app: container-escape-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ghcr.io/example/container-escape-frontend:latest
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 20
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: container-escape-frontend
+  namespace: container-escape
+spec:
+  selector:
+    app: container-escape-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: container-escape-daemon
+  namespace: container-escape
+spec:
+  selector:
+    matchLabels:
+      app: container-escape-daemon
+  template:
+    metadata:
+      labels:
+        app: container-escape-daemon
+    spec:
+      hostPID: true
+      containers:
+        - name: daemon
+          image: ghcr.io/example/container-escape-daemon:latest
+          securityContext:
+            privileged: true
+          env:
+            - name: BACKEND_URL
+              value: http://container-escape-backend:8000
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: container-escape-backend-hpa
+  namespace: container-escape
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: container-escape-backend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
