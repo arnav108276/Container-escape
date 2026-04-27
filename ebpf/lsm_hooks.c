@@ -15,9 +15,8 @@
  */
 BPF_RINGBUF_OUTPUT(events, 256);
 
-/* Use a standard named struct to keep the BCC parser happy */
 struct policy_rule {
-    char target_path_str[64];  /* Fixed-size array for path string */
+    char target_path_str; 
     __u32 action; 
 };
 
@@ -26,8 +25,8 @@ BPF_ARRAY(blocked_capabilities, __u32, 64);
 BPF_ARRAY(config_map, __u32, 10);
 
 #define EPERM 1
-#define MAX_ARGS 5
-#define MAX_STR_LEN 32
+#define MAX_RULES 10
+#define MAX_STR_LEN 64
 
 /* ============================================================================
  * EVENT STRUCTURES
@@ -40,8 +39,8 @@ struct file_access_event {
     __u32 gid;
     __u8 event_type;      
     __u8 action;          
-    char filepath[256];   /* Fixed-size array for path */
-    char comm[64];        /* Fixed-size array for comm */
+    char filepath;   
+    char comm;        
 };
 
 struct capability_event {
@@ -50,7 +49,7 @@ struct capability_event {
     __u32 uid;
     __u32 cap;
     __u8 action;
-    char comm[64];        /* Fixed-size array for comm */
+    char comm;        
 };
 
 struct exec_event {
@@ -58,10 +57,10 @@ struct exec_event {
     __u32 pid;
     __u32 ppid;
     __u32 uid;
-    char filename[128];   /* Fixed-size array for filename */
-    char args[128];        /* Fixed-size array for args */
+    char filename;   
+    char args;       
     __u8 action;
-    char comm[64];         /* Fixed-size array for comm */
+    char comm;        
 };
 
 /* ============================================================================
@@ -77,48 +76,25 @@ static __always_inline void get_current_task_info(__u32 *pid, __u32 *uid, __u32 
     *gid = uid_gid >> 32;
 }
 
-static __always_inline int str_contains(const char *str, const char *sub, int sub_len) {
+static __always_inline int is_path_blocked(const char *filepath) {
     #pragma unroll
-    for (int i = 0; i < MAX_STR_LEN; i++) {
-        if (str[i] == '\0') break;
+    for (__u32 i = 0; i < MAX_RULES; i++) {
+        struct policy_rule *entry = blocked_paths.lookup(&i);
+        if (!entry) continue;
+        if (entry->action == 0) break;
+        
         int match = 1;
         #pragma unroll
         for (int j = 0; j < MAX_STR_LEN; j++) {
-            if (j >= sub_len) break;
-            if (str[i+j] != sub[j]) { 
-                match = 0; 
-                break; 
+            if (entry->target_path_str[j] == '\0') break;
+            if (filepath[j] != entry->target_path_str[j]) {
+                match = 0;
+                break;
             }
         }
         if (match) return 1;
     }
     return 0;
-}
-
-static __always_inline int is_path_blocked(const char *filepath) {
-    #pragma unroll
-    for (__u32 i = 0; i < MAX_ARGS; i++) {
-        struct policy_rule *entry = blocked_paths.lookup(&i);
-        if (!entry) continue;
-        
-        if (entry->action == 0) break;
-        
-        /* FIX: Copy to local variable to work around BCC parser bug */
-        char path_str[64];
-        __builtin_memcpy(path_str, entry->target_path_str, 64);
-        
-        int match = 1;
-        #pragma unroll
-        for (int j = 0; j < MAX_STR_LEN; j++) {
-            if (filepath[j] != path_str[j]) {
-                match = 0;
-                break;
-            }
-            if (filepath[j] == '\0') break;
-        }
-        if (match) return 1;  /* BLOCK */
-    }
-    return 0;  /* ALLOW */
 }
 
 static __always_inline void submit_event(void *data, __u32 size) {
@@ -161,14 +137,17 @@ LSM_PROBE(file_open, struct file *file) {
     
     event.action = 0; 
     
-    /* FIX 2: Declare strings safely on the stack to bypass eBPF .rodata limits */
-    char path_etc[] = "/etc/";
-    char path_root[] = "/root/";
-    char path_env[] = ".env";
+    /* 100% Safe Substring Check: Bypasses .rodata and nested loops */
+    int is_sensitive = 0;
+    #pragma unroll
+    for (int i = 0; i < 64; i++) {
+        if (event.filepath[i] == '\0') break;
+        if (i < 60 && event.filepath[i] == '/' && event.filepath[i+1] == 'e' && event.filepath[i+2] == 't' && event.filepath[i+3] == 'c' && event.filepath[i+4] == '/') is_sensitive = 1;
+        if (i < 59 && event.filepath[i] == '/' && event.filepath[i+1] == 'r' && event.filepath[i+2] == 'o' && event.filepath[i+3] == 'o' && event.filepath[i+4] == 't' && event.filepath[i+5] == '/') is_sensitive = 1;
+        if (i < 61 && event.filepath[i] == '.' && event.filepath[i+1] == 'e' && event.filepath[i+2] == 'n' && event.filepath[i+3] == 'v') is_sensitive = 1;
+    }
 
-    if (str_contains(event.filepath, path_etc, 5) ||
-        str_contains(event.filepath, path_root, 6) ||
-        str_contains(event.filepath, path_env, 4)) {
+    if (is_sensitive) {
         submit_event(&event, sizeof(event));
     }
     
@@ -223,17 +202,19 @@ LSM_PROBE(bprm_check_security, struct linux_binprm *bprm) {
         bpf_probe_read_kernel_str(event.filename, sizeof(event.filename), bprm->filename);
     }
     
-    /* FIX 2: Declare strings safely on the stack to bypass eBPF .rodata limits */
-    char cmd_nc[] = "nc";
-    char cmd_socat[] = "socat";
-    char path_tmp[] = "/tmp/";
-    char path_shm[] = "/dev/shm/";
-
-    if (str_contains(event.filename, cmd_nc, 2) || 
-        str_contains(event.filename, cmd_socat, 5) || 
-        str_contains(event.filename, path_tmp, 5) || 
-        str_contains(event.filename, path_shm, 9)) {
+    /* 100% Safe Substring Check: Bypasses .rodata and nested loops */
+    int is_suspicious = 0;
+    #pragma unroll
+    for (int i = 0; i < 64; i++) {
+        if (event.filename[i] == '\0') break;
         
+        if (i < 63 && event.filename[i] == 'n' && event.filename[i+1] == 'c') is_suspicious = 1;
+        if (i < 60 && event.filename[i] == 's' && event.filename[i+1] == 'o' && event.filename[i+2] == 'c' && event.filename[i+3] == 'a' && event.filename[i+4] == 't') is_suspicious = 1;
+        if (i < 60 && event.filename[i] == '/' && event.filename[i+1] == 't' && event.filename[i+2] == 'm' && event.filename[i+3] == 'p' && event.filename[i+4] == '/') is_suspicious = 1;
+        if (i < 56 && event.filename[i] == '/' && event.filename[i+1] == 'd' && event.filename[i+2] == 'e' && event.filename[i+3] == 'v' && event.filename[i+4] == '/' && event.filename[i+5] == 's' && event.filename[i+6] == 'h' && event.filename[i+7] == 'm' && event.filename[i+8] == '/') is_suspicious = 1;
+    }
+
+    if (is_suspicious) {
         event.action = 1; 
         submit_event(&event, sizeof(event));
     } else {
