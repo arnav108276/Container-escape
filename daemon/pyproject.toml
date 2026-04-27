@@ -15,6 +15,7 @@ dependencies = [
     "python-dotenv==1.0.0",
     "structlog==24.1.0",
     "docker==7.0.0",
+    "urllib3==1.26.15"
 ]
 
 [tool.setuptools]

@@ -6,26 +6,72 @@ import json
 import platform
 import os
 import structlog
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any # <--- Ensure Any is here
 
 log = structlog.get_logger(__name__)
 
-
 class ContainerManager:
-    """Manages container lifecycle and quarantine operations"""
-    
     def __init__(self):
         self.quarantined_containers = set()
-        self.os_type = platform.system()  # Windows, Linux, Darwin
+        self.os_type = platform.system()
+        self.pid_cache = {}
+        self.container_info_cache = {}
+        
         default_ignored = "container-escape-,major2-daemon,major2-backend,major2-frontend,major2-mongodb"
         self.ignored_prefixes = [
             p.strip() for p in os.getenv("IGNORED_CONTAINER_PREFIXES", default_ignored).split(",") if p.strip()
         ]
+        
         try:
-            self.docker_client = docker.from_env()
+            log.info("Connecting to Docker SDK via direct Unix socket...")
+            # We use APIClient instead of from_env() to avoid the http+docker transport bug
+            self.docker_client = docker.APIClient(base_url='unix:///var/run/docker.sock')
+            self.docker_client.version() # Test connection
+            log.info("✓ Connected to Docker SDK successfully")
         except Exception as e:
-            log.warning("Failed to connect to Docker SDK", error=str(e))
+            log.error("Failed to connect to Docker SDK", error=str(e))
             self.docker_client = None
+
+    def get_container_id_from_pid(self, pid: int) -> Optional[str]:
+        """Resolves PID to Container ID using cgroups"""
+        try:
+            with open(f"/proc/{pid}/cgroup", "r") as f:
+                for line in f:
+                    if "docker" in line:
+                        # Extract the 64-char ID from the cgroup path
+                        parts = line.strip().split('/')
+                        for part in parts:
+                            if len(part) == 64:
+                                return part[:12]
+        except Exception:
+            return None
+        return None
+
+    # Keep your existing quarantine/risk scoring methods below...
+
+    def get_container_info(self, container_id: str) -> Dict[str, Any]:
+        """Fetch metadata for a specific container with caching"""
+        if container_id in self.container_info_cache:
+            return self.container_info_cache[container_id]
+
+        if not self.docker_client:
+            return {"container_id": container_id, "name": "unknown"}
+
+        try:
+            container = self.docker_client.containers.get(container_id)
+            info = {
+                'container_id': container.short_id,
+                'full_id': container.id,
+                'name': container.name,
+                'image': container.image.tags if container.image.tags else 'unknown',
+                'status': container.status,
+            }
+            self.container_info_cache[container_id] = info
+            return info
+        except Exception:
+            return {"container_id": container_id, "name": "unknown"}
+
+    # ... Keep your existing get_running_containers, quarantine, etc. methods below ...
     
     def get_running_containers(self) -> List[Dict]:
         """

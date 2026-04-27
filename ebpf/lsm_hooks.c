@@ -13,10 +13,14 @@
  * BPF MAPS
  * ============================================================================
  */
+#define EPERM 1
+#define MAX_RULES 10
+#define MAX_STR_LEN 64
+
 BPF_RINGBUF_OUTPUT(events, 256);
 
 struct policy_rule {
-    char target_path_str; 
+    char target_path_str[MAX_STR_LEN]; // Changed from char to char array
     __u32 action; 
 };
 
@@ -24,9 +28,6 @@ BPF_ARRAY(blocked_paths, struct policy_rule, 100);
 BPF_ARRAY(blocked_capabilities, __u32, 64);
 BPF_ARRAY(config_map, __u32, 10);
 
-#define EPERM 1
-#define MAX_RULES 10
-#define MAX_STR_LEN 64
 
 /* ============================================================================
  * EVENT STRUCTURES
@@ -39,8 +40,8 @@ struct file_access_event {
     __u32 gid;
     __u8 event_type;      
     __u8 action;          
-    char filepath;   
-    char comm;        
+    char filepath[MAX_STR_LEN]; // Changed to array
+    char comm;              // Changed to array (16 is TASK_COMM_LEN)
 };
 
 struct capability_event {
@@ -49,7 +50,7 @@ struct capability_event {
     __u32 uid;
     __u32 cap;
     __u8 action;
-    char comm;        
+    char comm;              // Changed to array
 };
 
 struct exec_event {
@@ -57,10 +58,10 @@ struct exec_event {
     __u32 pid;
     __u32 ppid;
     __u32 uid;
-    char filename;   
-    char args;       
+    char filename[MAX_STR_LEN];  // Changed to array
+    char args;             // Changed to array (increased size for args)
     __u8 action;
-    char comm;        
+    char comm;              // Changed to array
 };
 
 /* ============================================================================
@@ -79,19 +80,32 @@ static __always_inline void get_current_task_info(__u32 *pid, __u32 *uid, __u32 
 static __always_inline int is_path_blocked(const char *filepath) {
     #pragma unroll
     for (__u32 i = 0; i < MAX_RULES; i++) {
-        struct policy_rule *entry = blocked_paths.lookup(&i);
+        __u32 key = i;
+        struct policy_rule *entry = blocked_paths.lookup(&key);
+        
         if (!entry) continue;
-        if (entry->action == 0) break;
+        if (entry->action == 0) continue; 
         
         int match = 1;
-        #pragma unroll
-        for (int j = 0; j < MAX_STR_LEN; j++) {
-            if (entry->target_path_str[j] == '\0') break;
-            if (filepath[j] != entry->target_path_str[j]) {
-                match = 0;
-                break;
-            }
-        }
+        
+        // Flattened comparison to satisfy the verifier
+        if (entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+        if (match && entry->target_path_str != '\0' && filepath != entry->target_path_str) match = 0;
+
         if (match) return 1;
     }
     return 0;
@@ -138,13 +152,25 @@ LSM_PROBE(file_open, struct file *file) {
     event.action = 0; 
     
     /* 100% Safe Substring Check: Bypasses .rodata and nested loops */
+    /* Direct Prefix Check: Bypasses .rodata and loops */
     int is_sensitive = 0;
-    #pragma unroll
-    for (int i = 0; i < 64; i++) {
-        if (event.filepath[i] == '\0') break;
-        if (i < 60 && event.filepath[i] == '/' && event.filepath[i+1] == 'e' && event.filepath[i+2] == 't' && event.filepath[i+3] == 'c' && event.filepath[i+4] == '/') is_sensitive = 1;
-        if (i < 59 && event.filepath[i] == '/' && event.filepath[i+1] == 'r' && event.filepath[i+2] == 'o' && event.filepath[i+3] == 'o' && event.filepath[i+4] == 't' && event.filepath[i+5] == '/') is_sensitive = 1;
-        if (i < 61 && event.filepath[i] == '.' && event.filepath[i+1] == 'e' && event.filepath[i+2] == 'n' && event.filepath[i+3] == 'v') is_sensitive = 1;
+
+    // Check for "/etc/"
+    if (event.filepath == '/' && event.filepath == 'e' && 
+        event.filepath == 't' && event.filepath == 'c' && 
+        event.filepath == '/') {
+        is_sensitive = 1;
+    }
+    // Check for "/root/"
+    else if (event.filepath == '/' && event.filepath == 'r' && 
+             event.filepath == 'o' && event.filepath == 'o' && 
+             event.filepath == 't' && event.filepath == '/') {
+        is_sensitive = 1;
+    }
+    // Check for ".env"
+    else if (event.filepath == '.' && event.filepath == 'e' && 
+             event.filepath == 'n' && event.filepath == 'v') {
+        is_sensitive = 1;
     }
 
     if (is_sensitive) {
@@ -194,7 +220,6 @@ LSM_PROBE(bprm_check_security, struct linux_binprm *bprm) {
     event.pid = pid;
     event.uid = uid;
     event.ppid = 0; 
-    event.action = 0;
     
     bpf_get_current_comm(&event.comm, sizeof(event.comm));
     
@@ -202,16 +227,32 @@ LSM_PROBE(bprm_check_security, struct linux_binprm *bprm) {
         bpf_probe_read_kernel_str(event.filename, sizeof(event.filename), bprm->filename);
     }
     
-    /* 100% Safe Substring Check: Bypasses .rodata and nested loops */
+    /* Direct Prefix Check: We removed the loop and the #pragma unroll */
     int is_suspicious = 0;
-    #pragma unroll
-    for (int i = 0; i < 64; i++) {
-        if (event.filename[i] == '\0') break;
-        
-        if (i < 63 && event.filename[i] == 'n' && event.filename[i+1] == 'c') is_suspicious = 1;
-        if (i < 60 && event.filename[i] == 's' && event.filename[i+1] == 'o' && event.filename[i+2] == 'c' && event.filename[i+3] == 'a' && event.filename[i+4] == 't') is_suspicious = 1;
-        if (i < 60 && event.filename[i] == '/' && event.filename[i+1] == 't' && event.filename[i+2] == 'm' && event.filename[i+3] == 'p' && event.filename[i+4] == '/') is_suspicious = 1;
-        if (i < 56 && event.filename[i] == '/' && event.filename[i+1] == 'd' && event.filename[i+2] == 'e' && event.filename[i+3] == 'v' && event.filename[i+4] == '/' && event.filename[i+5] == 's' && event.filename[i+6] == 'h' && event.filename[i+7] == 'm' && event.filename[i+8] == '/') is_suspicious = 1;
+
+    // Check for "nc"
+    if (event.filename == 'n' && event.filename == 'c' && event.filename == '\0') {
+        is_suspicious = 1;
+    }
+    // Check for "socat"
+    else if (event.filename == 's' && event.filename == 'o' && 
+             event.filename == 'c' && event.filename == 'a' && 
+             event.filename == 't' && event.filename == '\0') {
+        is_suspicious = 1;
+    }
+    // Check for "/tmp/"
+    else if (event.filename == '/' && event.filename == 't' && 
+             event.filename == 'm' && event.filename == 'p' && 
+             event.filename == '/') {
+        is_suspicious = 1;
+    }
+    // Check for "/dev/shm/"
+    else if (event.filename == '/' && event.filename == 'd' && 
+             event.filename == 'e' && event.filename == 'v' && 
+             event.filename == '/' && event.filename == 's' &&
+             event.filename == 'h' && event.filename == 'm' && 
+             event.filename == '/') {
+        is_suspicious = 1;
     }
 
     if (is_suspicious) {

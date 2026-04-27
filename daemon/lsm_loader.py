@@ -133,15 +133,14 @@ class LSMEnforcer:
         Self-contained compilation: BCC compiles the C code inside the container 
         using the embedded WSL2 kernel headers.
         """
-        # Point directly to your C source code in the repo
         self.program_path = "/app/ebpf/lsm_hooks.c"
         log.info("Compiling eBPF source inside container...", path=self.program_path)
         
         try:
-            # We pass the C file and the compiler flags to increase the stack limit
+            # -O2 is CRITICAL here for the eBPF verifier to unroll loops properly
             self.bpf = BPF(
                 src_file=self.program_path,
-                cflags=["-w", "-mllvm", "-bpf-stack-size=1024"]
+                cflags=["-O2", "-w", "-mllvm", "-bpf-stack-size=1024"]
             )
             
             log.info("✓ eBPF programs compiled and loaded successfully!")
@@ -155,7 +154,7 @@ class LSMEnforcer:
     def _verify_maps(self) -> None:
         """Verify eBPF maps were created successfully"""
         
-        expected_maps = ['events', 'blocked_paths', 'blocked_capabilities', 'config']
+        expected_maps = ['events', 'blocked_paths', 'blocked_capabilities', 'config_map']
         
         for map_name in expected_maps:
             try:
@@ -179,26 +178,32 @@ class LSMEnforcer:
             idx = 0
             for i in range(100):
                 try:
+                    # Check if slot is empty or has a null path
                     existing = blocked_paths_map[ctypes.c_uint(i)]
-                    if existing is None:
+                    # BCC map access returns the struct; we check the first byte of target_path_str
+                    if not existing or existing.target_path_str == 0:
                         idx = i
                         break
                 except KeyError:
                     idx = i
                     break
             
-            # Create block entry
-            entry = struct.pack("256sI", 
-                              path.encode('utf-8'),
-                              1 if block else 0)
+            # 1. Prepare the raw bytes (64s for char, I for __u32)
+            # We use 64 bytes total for the string, leaving room for null terminator
+            path_bytes = path.encode('utf-8')[:63]
+            packed_data = struct.pack("64sI", path_bytes, 1 if block else 0)
             
-            blocked_paths_map[ctypes.c_uint(idx)] = entry
+            # 2. Convert raw bytes to a ctypes buffer (REQUIRED for BCC map updates)
+            value = ctypes.create_string_buffer(packed_data, len(packed_data))
+            
+            # 3. Update the map using the index and the ctypes buffer
+            blocked_paths_map[ctypes.c_uint(idx)] = value
             
             log.info("Added blocked path", path=path, index=idx, action="block" if block else "log")
             
         except Exception as e:
             log.error("Failed to add blocked path", path=path, error=str(e))
-    
+            
     def block_capability(self, cap_num: int) -> None:
         """
         Block a Linux capability.
