@@ -32,7 +32,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      MONGODB_URI: mongodb://admin:${MONGODB_PASSWORD:-secure-password-change-this}@mongodb:27017
+      MONGODB_URI: mongodb://admin:${MONGODB_PASSWORD:-secure-password-change-this}@mongodb:27017/?authSource=admin
       BACKEND_URL: ${BACKEND_URL:-http://localhost:8000}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -78,22 +78,24 @@ services:
     ipc: host
     network_mode: host
     environment:
-      MONGODB_URI: mongodb://admin:${MONGODB_PASSWORD:-secure-password-change-this}@localhost:27017
+      MONGODB_URI: mongodb://admin:${MONGODB_PASSWORD:-secure-password-change-this}@mongodb:27017/?authSource=admin
       BACKEND_URL: http://localhost:8000
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       ALERT_THRESHOLD: ${ALERT_THRESHOLD:-40}
       EBPF_SOURCE_FILE: /ebpf/monitor.c
+      BCC_SKIP_KERNEL_CHECK: 1
     depends_on:
       backend:
         condition: service_healthy
-    command: python daemon_modular.py
+    command: python3 daemon_modular.py
     volumes:
       - ./daemon:/app
-      - ./ebpf:/ebpf:ro
+      - ./ebpf:/app/ebpf
       - /var/run/docker.sock:/var/run/docker.sock
-      - /lib/modules:/lib/modules:ro
-      - /usr/src:/usr/src:ro
-      - /sys/kernel/debug:/sys/kernel/debug
+      - /lib/modules:/lib/modules:ro                # Maps the host kernel modules
+      - /usr/src:/usr/src:ro                        # Maps the host kernel headers
+      - /sys/kernel/debug:/sys/kernel/debug         # Required for BPF tracing
+      - /sys/kernel/btf:/sys/kernel/btf:ro    # For BTF types (vmlinux)
     restart: unless-stopped
     mem_limit: 1g
     cap_add:
