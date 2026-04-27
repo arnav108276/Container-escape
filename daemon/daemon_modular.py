@@ -72,8 +72,10 @@ class DaemonOrchestrator:
             bpf_obj = self.lsm_enforcer.bpf
             
             # 2. Initialize forensic logger
+            # FIX: Pass the MongoDB URI from environment instead of a log path
             log.info('Initializing forensic logger...')
-            self.forensic_logger = ForensicLogger('/var/log/container-escape-detection')
+            mongodb_uri = os.getenv('MONGODB_URI', 'mongodb://admin:secure-password-change-this@127.0.0.1:27017/?authSource=admin')
+            self.forensic_logger = ForensicLogger(mongodb_uri)
             
             # 3. Initialize container manager
             log.info('Initializing container manager...')
@@ -102,7 +104,7 @@ class DaemonOrchestrator:
         except Exception as e:
             log.error('Daemon initialization failed', error=str(e), exc_info=True)
             return False
-    
+
     def _on_alert(self, alert: dict) -> None:
         """Callback when a high-risk alert is generated"""
         try:
