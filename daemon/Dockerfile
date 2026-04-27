@@ -30,8 +30,9 @@ RUN git clone --depth 1 -b linux-msft-wsl-6.6.y https://github.com/microsoft/WSL
 ENV BCC_KERNEL_SOURCE=/opt/wsl-kernel
 
 # 4. Install Python dependencies using uv directly to the system
-COPY pyproject.toml requirements.txt ./
-RUN uv pip install --no-cache --system -r requirements.txt
+# 4. Install Python dependencies EXPLICITLY using uv to the system
+COPY pyproject.toml ./
+RUN uv pip install --no-cache --system . aiohttp motor fastapi numpy numba
 
 # 5. Copy application code
 COPY . .
