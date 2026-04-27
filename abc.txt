@@ -1,0 +1,146 @@
+.
+├── README.md
+├── abc.txt
+├── backend
+│   ├── Dockerfile
+│   ├── README.md
+│   ├── __pycache__
+│   │   ├── auth.cpython-312.pyc
+│   │   ├── database.cpython-312.pyc
+│   │   ├── filtering.cpython-312.pyc
+│   │   ├── main.cpython-312.pyc
+│   │   └── models.cpython-312.pyc
+│   ├── auth.py
+│   ├── database.py
+│   ├── filtering.py
+│   ├── main.py
+│   ├── models.py
+│   ├── pyproject.toml
+│   ├── routes
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   ├── admin.cpython-312.pyc
+│   │   │   ├── alerts.cpython-312.pyc
+│   │   │   ├── auth.cpython-312.pyc
+│   │   │   ├── containers.cpython-312.pyc
+│   │   │   ├── events.cpython-312.pyc
+│   │   │   ├── notifications.cpython-312.pyc
+│   │   │   ├── reports.cpython-312.pyc
+│   │   │   └── websocket.cpython-312.pyc
+│   │   ├── admin.py
+│   │   ├── alerts.py
+│   │   ├── auth.py
+│   │   ├── containers.py
+│   │   ├── events.py
+│   │   ├── notifications.py
+│   │   ├── reports.py
+│   │   └── websocket.py
+│   └── uv.lock
+├── daemon
+│   ├── Dockerfile
+│   ├── README.md
+│   ├── __pycache__
+│   │   ├── backend_api_client.cpython-310.pyc
+│   │   ├── container_manager.cpython-310.pyc
+│   │   ├── event_processor_orchestrator.cpython-310.pyc
+│   │   ├── logger.cpython-310.pyc
+│   │   ├── lsm_loader.cpython-310.pyc
+│   │   ├── lsm_loader.cpython-312.pyc
+│   │   ├── ring_buffer_reader.cpython-310.pyc
+│   │   └── risk_scorer_enhanced.cpython-310.pyc
+│   ├── backend_api_client.py
+│   ├── container_manager.py
+│   ├── daemon.py
+│   ├── daemon_modular.py
+│   ├── ebpf
+│   ├── event_processor.py
+│   ├── event_processor_orchestrator.py
+│   ├── k8s_identity.py
+│   ├── logger.py
+│   ├── lsm_loader.py
+│   ├── policy_controller.py
+│   ├── pyproject.toml
+│   ├── requirements.txt
+│   ├── ring_buffer_reader.py
+│   ├── risk_scorer.py
+│   ├── risk_scorer_enhanced.py
+│   └── uv.lock
+├── docker-compose.yml
+├── ebpf
+│   ├── Makefile
+│   ├── README.md
+│   ├── common.h
+│   ├── detections.c
+│   ├── lsm_hooks.c
+│   ├── monitor.c
+│   └── vmlinux.h
+├── frontend
+│   ├── Dockerfile
+│   ├── README.md
+│   ├── docker-entrypoint.sh
+│   ├── index.html
+│   ├── nginx.conf
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── postcss.config.js
+│   ├── src
+│   │   ├── App.css
+│   │   ├── App.tsx
+│   │   ├── components
+│   │   │   ├── AlertsDisplay.tsx
+│   │   │   ├── ContainersDisplay.tsx
+│   │   │   ├── EventsDisplay.tsx
+│   │   │   ├── MetricCard.tsx
+│   │   │   ├── MetricsDisplay.tsx
+│   │   │   ├── Navigation.tsx
+│   │   │   ├── ReportGenerator.tsx
+│   │   │   ├── RiskChart.tsx
+│   │   │   ├── Sidebar.tsx
+│   │   │   ├── StatCard.tsx
+│   │   │   ├── SystemHealthDisplay.tsx
+│   │   │   └── ui
+│   │   │       ├── button.tsx
+│   │   │       └── card.tsx
+│   │   ├── index.css
+│   │   ├── main.tsx
+│   │   ├── pages
+│   │   │   ├── Alerts.tsx
+│   │   │   ├── Containers.tsx
+│   │   │   ├── Dashboard.tsx
+│   │   │   └── Reports.tsx
+│   │   ├── services
+│   │   │   └── api.ts
+│   │   ├── store
+│   │   │   ├── dashboardStore.ts
+│   │   │   ├── index.ts
+│   │   │   ├── systemMetrics.ts
+│   │   │   └── themeStore.ts
+│   │   └── vite-env.d.ts
+│   ├── tailwind.config.js
+│   ├── tsconfig.json
+│   ├── tsconfig.node.json
+│   └── vite.config.ts
+├── k8s
+│   ├── backend-deployment.yaml
+│   ├── crds
+│   │   └── policies_crd.yaml
+│   ├── daemon-daemonset.yaml
+│   ├── frontend-deployment.yaml
+│   ├── hpa.yaml
+│   ├── persistence.yaml
+│   ├── secrets-template.yaml
+│   └── single-manifest.yaml
+├── package-lock.json
+├── package.json
+├── scripts
+│   ├── smoke-test.sh
+│   ├── wsl-local-setup.sh
+│   ├── wsl-local-setup.sh.new
+│   ├── wsl-local-start.sh
+│   └── wsl-local-start.sh.new
+├── setup.md
+├── setup.sh
+└── sync-containers.py
+
+19 directories, 125 files

@@ -28,11 +28,7 @@ import structlog
 from pydantic import BaseModel
 
 # eBPF loading libraries
-try:
-    from bcc import BPF, libbpf
-except ImportError:
-    print("ERROR: bcc library not found. Install with: pip install bcc")
-    sys.exit(1)
+from bcc import BPF
 
 # Configure structured logging
 structlog.configure(
@@ -134,38 +130,28 @@ class LSMEnforcer:
     
     def load(self) -> bool:
         """
-        Load eBPF LSM programs into kernel.
-        
-        Returns: True if successful, False otherwise
+        Self-contained compilation: BCC compiles the C code inside the container 
+        using the embedded WSL2 kernel headers.
         """
-        log.info("Loading eBPF LSM programs...", path=self.program_path)
+        # Point directly to your C source code in the repo
+        self.program_path = "/app/ebpf/lsm_hooks.c"
+        log.info("Compiling eBPF source inside container...", path=self.program_path)
         
         try:
-            # Read compiled eBPF object file
-            with open(self.program_path, 'rb') as f:
-                obj_data = f.read()
+            # We pass the C file and the compiler flags to increase the stack limit
+            self.bpf = BPF(
+                src_file=self.program_path,
+                cflags=["-w", "-mllvm", "-bpf-stack-size=1024"]
+            )
             
-            log.info("Compiled program loaded", size=len(obj_data))
-            
-            # Attempt to load using libbpf (more stable for LSM)
-            try:
-                # Load eBPF object
-                self.bpf = BPF(src_file=self.program_path)
-                log.info("✓ eBPF programs loaded successfully")
+            log.info("✓ eBPF programs compiled and loaded successfully!")
+            self._verify_maps()
+            return True
                 
-                # Verify maps were created
-                self._verify_maps()
-                
-                return True
-                
-            except Exception as e:
-                log.error("Failed to load with libbpf", error=str(e))
-                return False
-            
         except Exception as e:
-            log.error("Failed to load eBPF programs", error=str(e))
+            log.error("Failed to compile eBPF source", error=str(e))
             return False
-    
+
     def _verify_maps(self) -> None:
         """Verify eBPF maps were created successfully"""
         

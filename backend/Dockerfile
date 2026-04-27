@@ -1,39 +1,57 @@
-FROM python:3.12-slim
+# =============================================================================
+# Stage 1: Builder - Install dependencies
+# =============================================================================
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    git \
-    ca-certificates \
-    gnupg \
-    lsb-release \
-    && rm -rf /var/lib/apt/lists/*
+# Install uv for faster dependency installation
+RUN pip install --no-cache-dir uv
 
-# Copy project files first
-COPY . .
+# Copy only dependency files for better layer caching
+COPY pyproject.toml ./
 
-# Install Python dependencies directly with pip
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
-    fastapi==0.104.1 \
-    uvicorn[standard]==0.24.0 \
-    pymongo==4.6.1 \
-    pydantic==2.5.0 \
-    python-dotenv==1.0.0 \
-    structlog==24.1.0 \
-    python-multipart==0.0.6 \
-    httpx==0.25.2 \
-    motor==3.3.2 \
-    PyJWT==2.12.1 \
-    pydantic-settings==2.1.0 \
-    email-validator==2.1.0 \
-    reportlab==4.0.7
+# Install Python dependencies into isolated environment
+RUN uv venv /app/.venv && \
+    . /app/.venv/bin/activate && \
+    uv pip install --no-cache -r pyproject.toml
+
+# =============================================================================
+# Stage 2: Production - Minimal runtime image
+# =============================================================================
+FROM python:3.12-slim AS production
+
+# Security: Create non-root user
+RUN groupadd --gid 1000 appgroup && \
+    useradd --uid 1000 --gid appgroup --shell /bin/false --create-home appuser
+
+WORKDIR /app
+
+# Copy only virtual environment from builder (not pyproject.toml or source)
+COPY --from=builder /app/.venv /app/.venv
+
+# Copy application code
+COPY --chown=appuser:appgroup . .
+
+# Environment variables for production
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_SYSTEM_PYTHON=1
+
+# Activate virtual environment
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Switch to non-root user
+USER appuser
 
 # Expose port
 EXPOSE 8000
 
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
+
 # Run application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
