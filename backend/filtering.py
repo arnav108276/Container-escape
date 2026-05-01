@@ -2,7 +2,7 @@
 
 import os
 
-DEFAULT_IGNORED_PREFIXES = "container-escape-,major2-daemon,major2-backend,major2-frontend,major2-mongodb"
+DEFAULT_IGNORED_PREFIXES = "container-escape-,container-security-,major2-daemon,major2-backend,major2-frontend,major2-mongodb"
 IGNORED_CONTAINER_PREFIXES = [
     p.strip() for p in os.getenv("IGNORED_CONTAINER_PREFIXES", DEFAULT_IGNORED_PREFIXES).split(",") if p.strip()
 ]

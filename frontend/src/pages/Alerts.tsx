@@ -25,6 +25,7 @@ export default function Alerts() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [summary, setSummary] = useState<AlertSummary | null>(null);
   const [loading, setLoading] = useState(false);
+  const [configLoading, setConfigLoading] = useState(false);
   const [includeAcknowledged, setIncludeAcknowledged] = useState(false);
   const [selectedAlerts, setSelectedAlerts] = useState<Set<string>>(new Set());
   const [acknowledging, setAcknowledging] = useState(false);
@@ -43,10 +44,6 @@ export default function Alerts() {
       ]);
       setAlerts(alertsResponse.data.alerts || []);
       setSummary(summaryResponse.data || null);
-      const notificationResponse = await apiClient.getNotificationConfig();
-      setEmailRecipients((notificationResponse.data?.recipients || []).join(", "));
-      setEmailEnabled(Boolean(notificationResponse.data?.enabled));
-      setMinSeverity(notificationResponse.data?.min_severity || "high");
     } catch (error) {
       console.error("Failed to fetch alerts:", error);
       setErrorMessage("Failed to load alerts. Please verify backend connectivity.");
@@ -60,6 +57,25 @@ export default function Alerts() {
     const interval = setInterval(() => fetchAlerts(false), 5000);
     return () => clearInterval(interval);
   }, [includeAcknowledged]);
+
+  useEffect(() => {
+    fetchNotificationConfig();
+  }, []);
+
+  const fetchNotificationConfig = async () => {
+    setConfigLoading(true);
+    try {
+      const notificationResponse = await apiClient.getNotificationConfig();
+      setEmailRecipients((notificationResponse.data?.recipients || []).join(", "));
+      setEmailEnabled(Boolean(notificationResponse.data?.enabled));
+      setMinSeverity(notificationResponse.data?.min_severity || "high");
+    } catch (error) {
+      console.error("Failed to fetch notification config:", error);
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
 
   const selectAll = useMemo(
     () => alerts.length > 0 && selectedAlerts.size === alerts.filter((a) => a.alert_id).length,
@@ -105,7 +121,7 @@ export default function Alerts() {
       } else {
         await apiClient.acknowledgeAllAlerts();
       }
-      await fetchAlerts();
+      await fetchAlerts(false);
     } catch (error: any) {
       alert(`Failed to acknowledge alerts: ${error?.message || "unknown error"}`);
     } finally {
@@ -147,6 +163,7 @@ export default function Alerts() {
         <>
           <section className="rounded-xl border border-gray-700 bg-gray-800 p-4">
             <h2 className="text-lg font-semibold text-white">Email Alerting</h2>
+            <p className="mt-1 text-xs text-gray-400">Configure recipients here. SMTP app password is set in backend environment (SMTP_PASSWORD).</p>
             <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
               <label className="flex items-center gap-2 text-sm text-gray-300">
                 <input type="checkbox" checked={emailEnabled} onChange={(e) => setEmailEnabled(e.target.checked)} />
@@ -164,8 +181,8 @@ export default function Alerts() {
                 className="md:col-span-2 rounded border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-white"
               />
             </div>
-            <button onClick={saveNotificationConfig} className="mt-3 rounded bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700">
-              Save Notification Settings
+            <button onClick={saveNotificationConfig} disabled={configLoading} className="mt-3 rounded bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 disabled:bg-gray-600">
+              {configLoading ? "Loading..." : "Save Notification Settings"}
             </button>
           </section>
 
@@ -188,23 +205,6 @@ export default function Alerts() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-gray-700 bg-gray-800 p-4">
-            <h2 className="text-lg font-semibold text-white">Containers with Alerts (24h)</h2>
-            {summary.top_containers?.length ? (
-              <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
-                {summary.top_containers.map((container) => (
-                  <div key={container.container_id} className="flex items-center justify-between rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm">
-                    <span className="font-mono text-gray-200">{container.container_id}</span>
-                    <span className="rounded bg-blue-950 px-2 py-0.5 text-xs font-semibold text-blue-200">
-                      {container.count} alerts
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-2 text-sm text-gray-400">No containers with alerts in the last 24 hours.</p>
-            )}
-          </section>
         </>
       )}
 

@@ -174,9 +174,8 @@ function App() {
           </main>
 
           {/* Footer */}
-          <footer className="px-6 py-4 border-t border-border text-xs text-muted-foreground flex items-center justify-between">
-            <div>Container Escape Detection System • Real-Time Security Monitoring</div>
-            <div>v1.0.0 • Enterprise Edition</div>
+          <footer className="px-6 py-3 border-t border-border text-xs text-slate-400">
+            Container Guardian
           </footer>
         </div>
       </div>
