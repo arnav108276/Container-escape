@@ -33,8 +33,8 @@ export default function Alerts() {
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [minSeverity, setMinSeverity] = useState("high");
 
-  const fetchAlerts = async () => {
-    setLoading(true);
+  const fetchAlerts = async (showLoading = false) => {
+    if (showLoading) setLoading(true);
     setErrorMessage("");
     try {
       const [alertsResponse, summaryResponse] = await Promise.all([
@@ -43,7 +43,6 @@ export default function Alerts() {
       ]);
       setAlerts(alertsResponse.data.alerts || []);
       setSummary(summaryResponse.data || null);
-      setSelectedAlerts(new Set());
       const notificationResponse = await apiClient.getNotificationConfig();
       setEmailRecipients((notificationResponse.data?.recipients || []).join(", "));
       setEmailEnabled(Boolean(notificationResponse.data?.enabled));
@@ -57,8 +56,8 @@ export default function Alerts() {
   };
 
   useEffect(() => {
-    fetchAlerts();
-    const interval = setInterval(fetchAlerts, 5000);
+    fetchAlerts(true);
+    const interval = setInterval(() => fetchAlerts(false), 5000);
     return () => clearInterval(interval);
   }, [includeAcknowledged]);
 
