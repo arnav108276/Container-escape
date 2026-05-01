@@ -55,6 +55,7 @@ function App() {
     let ws: WebSocket | null = null;
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
+    let reconnectDelay = 3000;
 
     const connectWebSocket = () => {
       if (disposed) return;
@@ -68,13 +69,15 @@ function App() {
 
       ws.onopen = () => {
         console.log("WebSocket connected");
-        setIsConnected(true);
+        setIsConnected((prev) => (prev ? prev : true));
+        reconnectDelay = 3000;
       };
 
       ws.onclose = () => {
         if (disposed) return;
-        setIsConnected(false);
-        reconnectTimeout = setTimeout(connectWebSocket, 3000);
+        setIsConnected((prev) => (prev ? false : prev));
+        reconnectTimeout = setTimeout(connectWebSocket, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 30000);
       };
 
       ws.onerror = (error) => {
@@ -127,12 +130,12 @@ function App() {
 
   return (
     <Router>
-      <div className="flex h-screen bg-background text-foreground overflow-hidden">
+      <div className="flex h-screen bg-background text-foreground overflow-visible">
         {/* Sidebar */}
         <Sidebar />
 
         {/* Right Side Layout */}
-        <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="flex flex-col flex-1 overflow-visible">
           {/* Top Navigation */}
           <Navigation isConnected={isConnected} />
 

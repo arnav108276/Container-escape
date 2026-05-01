@@ -123,6 +123,7 @@ export default function ReportGenerator() {
       .map((value) => value.trim())
       .filter(Boolean);
 
+    setScheduleLoading(true);
     setStatusMessage('Creating scheduled report...');
     try {
       await apiClient.createReportSchedule({
@@ -138,26 +139,34 @@ export default function ReportGenerator() {
       fetchSchedules();
     } catch (error) {
       setStatusMessage('Failed to create scheduled report.');
+    } finally {
+      setScheduleLoading(false);
     }
   };
 
   const handleDeleteSchedule = async (scheduleId: string) => {
+    setScheduleLoading(true);
     try {
       await apiClient.deleteReportSchedule(scheduleId);
       setStatusMessage('Scheduled report deleted.');
       fetchSchedules();
     } catch (error) {
       setStatusMessage('Failed to delete the scheduled report.');
+    } finally {
+      setScheduleLoading(false);
     }
   };
 
   const handleRunScheduleNow = async (scheduleId: string) => {
+    setScheduleLoading(true);
     try {
       await apiClient.runReportSchedule(scheduleId);
       setStatusMessage('Scheduled report executed immediately.');
       fetchSchedules();
     } catch (error) {
       setStatusMessage('Failed to run scheduled report.');
+    } finally {
+      setScheduleLoading(false);
     }
   };
 

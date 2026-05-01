@@ -17,6 +17,8 @@ interface DashboardState {
   addAlert: (alert: any) => void;
 }
 
+const isEqual = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
 export const useDashboardStore = create<DashboardState>((set) => ({
   metrics: {
     total_containers: 0,
@@ -27,8 +29,8 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   alerts: [],
   loading: false,
   error: null,
-  setMetrics: (metrics) => set({ metrics }),
-  setAlerts: (alerts) => set({ alerts }),
+  setMetrics: (metrics) => set((state) => (isEqual(state.metrics, metrics) ? state : { metrics })),
+  setAlerts: (alerts) => set((state) => (isEqual(state.alerts, alerts) ? state : { alerts })),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
   addAlert: (alert) =>

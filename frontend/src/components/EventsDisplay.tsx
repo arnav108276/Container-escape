@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSystemMetrics, SecurityEvent } from '../store';
 
 const getRiskColor = (riskLevel: string) => {
@@ -32,6 +32,11 @@ const getActionColor = (action: string) => {
 const EventsDisplay: React.FC = () => {
   const { events, addEvent } = useSystemMetrics();
   const [wsConnected, setWsConnected] = useState(false);
+  const addEventRef = useRef(addEvent);
+
+  useEffect(() => {
+    addEventRef.current = addEvent;
+  }, [addEvent]);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -52,7 +57,7 @@ const EventsDisplay: React.FC = () => {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          addEvent({
+          addEventRef.current({
             id: Math.random().toString(36).substr(2, 9),
             timestamp: new Date().toISOString(),
             ...data,
@@ -73,7 +78,7 @@ const EventsDisplay: React.FC = () => {
     return () => {
       if (ws) ws.close();
     };
-  }, [addEvent]);
+  }, []);
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow">

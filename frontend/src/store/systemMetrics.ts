@@ -62,6 +62,13 @@ interface MetricsStore {
   clearOldEvents: (olderThan: number) => void;
 }
 
+
+const isSameArray = <T,>(a: T[], b: T[]) =>
+  a.length === b.length && a.every((item, index) => JSON.stringify(item) === JSON.stringify(b[index]));
+
+const isSameMetrics = (a: SystemMetrics, b: SystemMetrics) =>
+  JSON.stringify(a) === JSON.stringify(b);
+
 const defaultMetrics: SystemMetrics = {
   totalContainers: 0,
   activeAlerts: 0,
@@ -81,13 +88,15 @@ export const useSystemMetrics = create<MetricsStore>(
     alerts: [],
 
     setMetrics: (newMetrics: Partial<SystemMetrics>) =>
-      set((state: MetricsStore) => ({
-        metrics: {
+      set((state: MetricsStore) => {
+        const nextMetrics = {
           ...state.metrics,
           ...newMetrics,
           lastUpdated: new Date().toISOString(),
-        },
-      })),
+        };
+        if (isSameMetrics(state.metrics, nextMetrics)) return state;
+        return { metrics: nextMetrics };
+      }),
 
     addEvent: (event: SecurityEvent) =>
       set((state: MetricsStore) => {
@@ -116,13 +125,16 @@ export const useSystemMetrics = create<MetricsStore>(
       })),
 
     setContainers: (containers: Container[]) =>
-      set((state: MetricsStore) => ({
-        containers,
-        metrics: {
-          ...state.metrics,
-          totalContainers: containers.length,
-        },
-      })),
+      set((state: MetricsStore) => {
+        if (isSameArray(state.containers, containers)) return state;
+        return {
+          containers,
+          metrics: {
+            ...state.metrics,
+            totalContainers: containers.length,
+          },
+        };
+      }),
 
     addAlert: (alert: Alert) =>
       set((state: MetricsStore) => ({
@@ -134,13 +146,16 @@ export const useSystemMetrics = create<MetricsStore>(
       })),
 
     setAlerts: (alerts: Alert[]) =>
-      set((state: MetricsStore) => ({
-        alerts,
-        metrics: {
-          ...state.metrics,
-          activeAlerts: alerts.filter((a: Alert) => a.status === 'new').length,
-        },
-      })),
+      set((state: MetricsStore) => {
+        if (isSameArray(state.alerts, alerts)) return state;
+        return {
+          alerts,
+          metrics: {
+            ...state.metrics,
+            activeAlerts: alerts.filter((a: Alert) => a.status === 'new').length,
+          },
+        };
+      }),
 
     updateContainerRisk: (containerId: string, riskScore: number) =>
       set((state: MetricsStore) => ({

@@ -19,9 +19,6 @@ const MetricsDisplay: React.FC = () => {
     };
 
     fetchMetrics();
-    const interval = setInterval(fetchMetrics, 5000); // Update every 5 seconds
-
-    return () => clearInterval(interval);
   }, [setMetrics]);
 
   if (loading) {
