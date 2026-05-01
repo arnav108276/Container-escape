@@ -12,11 +12,11 @@ router = APIRouter()
 
 def _smtp_settings() -> dict[str, str | int]:
     return {
-        "host": os.getenv("SMTP_HOST", ""),
+        "host": os.getenv("SMTP_HOST") or os.getenv("SMTP_SERVER", ""),
         "port": int(os.getenv("SMTP_PORT", "587")),
         "username": os.getenv("SMTP_USERNAME", ""),
         "password": os.getenv("SMTP_PASSWORD", ""),
-        "from_email": os.getenv("SMTP_FROM_EMAIL", "noreply@container-guardian.local"),
+        "from_email": os.getenv("SMTP_FROM_EMAIL") or os.getenv("ALERT_EMAIL_FROM", "noreply@container-guardian.local"),
     }
 
 
