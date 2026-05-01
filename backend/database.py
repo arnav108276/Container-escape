@@ -134,10 +134,11 @@ class Database:
             )
             
             return {
-                'total_containers': total_containers,
-                'quarantined_containers': quarantined,
-                'events_24h': events_24h,
-                'critical_alerts': critical_alerts
+                'totalContainers': total_containers,
+                'quarantinedContainers': quarantined,
+                'activeAlerts': critical_alerts,
+                'blockedEvents': events_24h,
+                'riskyProcesses': 0
             }
         except Exception as e:
             log.error("Failed to get metrics", error=str(e))

@@ -221,6 +221,28 @@ class EventProcessorOrchestrator:
                 self.stats['errors'] += 1
                 await asyncio.sleep(5)
     
+    async def container_sync_loop(self) -> None:
+        """Background task: periodically sync running containers to backend"""
+        sync_interval = 30  # Sync every 30 seconds
+        
+        while True:
+            try:
+                if self.container_manager and self.api_client:
+                    # Get running containers
+                    containers = self.container_manager.get_running_containers()
+                    
+                    if containers:
+                        logger.info(f'Syncing {len(containers)} containers to backend')
+                        async with self.api_client as client:
+                            await client.sync_containers(containers)
+                
+                await asyncio.sleep(sync_interval)
+                
+            except Exception as e:
+                logger.error(f'Error in container sync loop: {e}')
+                self.stats['errors'] += 1
+                await asyncio.sleep(sync_interval)
+    
     async def start(self) -> None:
         """Start event processor"""
         try:
@@ -233,6 +255,7 @@ class EventProcessorOrchestrator:
             await asyncio.gather(
                 self.event_processing_loop(),
                 self.event_sending_loop(),
+                self.container_sync_loop(),
             )
             
         except Exception as e:

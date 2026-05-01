@@ -37,7 +37,11 @@ const EventsDisplay: React.FC = () => {
     let ws: WebSocket | null = null;
 
     const connectWebSocket = () => {
-      const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws/events';
+      let wsUrl = import.meta.env.VITE_WS_URL;
+      if (!wsUrl) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${protocol}//${window.location.host}/ws/events`;
+      }
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {

@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   mongodb:
     image: mongo:7.0
@@ -76,6 +74,8 @@ services:
     environment:
       MONGODB_URI: mongodb://admin:${MONGODB_PASSWORD:-secure-password-change-this}@127.0.0.1:27017/?authSource=admin
       BACKEND_URL: http://localhost:8000
+      # Force Docker SDK to use the host unix socket inside the daemon container
+      DOCKER_HOST: unix:///var/run/docker.sock
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       ALERT_THRESHOLD: ${ALERT_THRESHOLD:-40}
       EBPF_SOURCE_FILE: /ebpf/monitor.c

@@ -27,19 +27,9 @@ export default defineConfig({
     reportCompressedSize: false,
     rollupOptions: {
       output: {
-        manualChunks: (id) => {
-          if (id.includes('node_modules')) {
-            if (id.includes('react')) {
-              return 'react-vendor'
-            }
-            if (id.includes('recharts')) {
-              return 'recharts-vendor'
-            }
-            if (id.includes('radix-ui')) {
-              return 'radix-vendor'
-            }
-            return 'vendor'
-          }
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'vendor': ['axios', 'zustand', 'recharts', 'lucide-react', 'radix-ui'],
         },
       },
     },

@@ -5,9 +5,78 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Container Escape Detection & Prevention System</title>
+    <!-- Inline runtime error overlay for debugging mount failures -->
+    <script>
+      (function(){
+        function showError(msg){
+          try{
+            var root = document.getElementById('root');
+            var pre = document.createElement('pre');
+            pre.style.whiteSpace = 'pre-wrap';
+            pre.style.color = '#c53030';
+            pre.style.background = '#fff6f6';
+            pre.style.padding = '16px';
+            pre.style.borderRadius = '6px';
+            pre.textContent = msg;
+            if(root){ root.innerHTML=''; root.appendChild(pre); }
+            else { document.body.innerHTML = ''; document.body.appendChild(pre); }
+          }catch(e){/* ignore */}
+        }
+        window.addEventListener('error', function(e){
+          var m = e && (e.message || (e.error && e.error.message)) || String(e);
+          showError('Error: ' + m + '\n' + (e.filename || '') + ':' + (e.lineno||'') + ':' + (e.colno||''));
+        });
+        window.addEventListener('unhandledrejection', function(ev){
+          var r = ev && ev.reason;
+          showError('Unhandled Rejection: ' + (r && (r.stack || r.message) || String(r)));
+        });
+      })();
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Static fallback content so users aren't met with a blank page while JS loads -->
+    <div id="root">
+      <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-size:18px;color:#222">Loading application…</div>
+    </div>
+
+    <!-- Runtime error collector: report errors back to the backend for debugging -->
+    <script>
+      (function(){
+        const seen = new Set();
+        function sendError(kind, message){
+          try{
+            const key = kind+':'+(message||'');
+            if(seen.has(key)) return; seen.add(key);
+            const body = JSON.stringify({
+              container_id: 'frontend-debug',
+              event_type: 'frontend-runtime',
+              risk_score: 0,
+              details: message && message.substring ? message.substring(0, 4000) : String(message),
+              timestamp: new Date().toISOString(),
+              reason: 'frontend-debug'
+            });
+            // use relative path so nginx proxy forwards to backend
+            navigator.sendBeacon && navigator.sendBeacon('/api/alerts', body) || fetch('/api/alerts', {method:'POST',headers:{'Content-Type':'application/json'},body}).catch(()=>{});
+          }catch(e){/* ignore */}
+        }
+
+        window.addEventListener('error', function(e){
+          const msg = (e && (e.message || (e.error && e.error.message))) || String(e || 'unknown');
+          sendError('error', msg + '\n' + (e.filename||'') + ':' + (e.lineno||'') + ':' + (e.colno||''));
+        });
+
+        window.addEventListener('unhandledrejection', function(ev){
+          const r = ev && ev.reason; sendError('unhandledrejection', (r && (r.stack || r.message)) || String(r));
+        });
+
+        const orig = console.error.bind(console);
+        console.error = function(...args){
+          try{ sendError('console.error', args.map(a=>typeof a==='string'?a:JSON.stringify(a)).join(' ')); }catch(e){}
+          return orig(...args);
+        };
+      })();
+    </script>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

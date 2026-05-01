@@ -6,31 +6,236 @@ import json
 import platform
 import os
 import structlog
-from typing import Optional, List, Dict, Any # <--- Ensure Any is here
+from typing import Optional, List, Dict, Any
+from urllib.parse import quote
+
+# Optional faster unix-socket HTTP fallback using requests_unixsocket. We
+# import lazily to avoid hard-failing when that dependency is not installed.
+try:
+    import requests_unixsocket
+except Exception:
+    requests_unixsocket = None
 
 log = structlog.get_logger(__name__)
 
 class ContainerManager:
+    """Manages container lifecycle and quarantine operations"""
+    
     def __init__(self):
         self.quarantined_containers = set()
+        # Cache for container metadata fetched from the Docker daemon to avoid
+        # repeated SDK/CLI lookups during short-lived operations.
+        self.container_info_cache: Dict[str, Dict[str, Any]] = {}
         self.os_type = platform.system()
-        self.pid_cache = {}
-        self.container_info_cache = {}
-        
+        # Add back the ignored prefixes so your own daemon doesn't flag itself
         default_ignored = "container-escape-,major2-daemon,major2-backend,major2-frontend,major2-mongodb"
         self.ignored_prefixes = [
             p.strip() for p in os.getenv("IGNORED_CONTAINER_PREFIXES", default_ignored).split(",") if p.strip()
         ]
         
+        # Try connecting to the Docker daemon. Prefer the host unix socket
+        # when it exists to avoid unsupported schemes like "http+docker://"
+        # that can appear in some Docker Desktop/contexts setups.
+        sock = "/var/run/docker.sock"
+        tried = []
+
+        if os.path.exists(sock):
+            # Some Docker client implementations may still read DOCKER_HOST
+            # from the environment even when base_url is provided. Temporarily
+            # clear Docker-related env vars to force a unix-socket connection.
+            saved_env = {
+                'DOCKER_HOST': os.environ.pop('DOCKER_HOST', None),
+                'DOCKER_TLS_VERIFY': os.environ.pop('DOCKER_TLS_VERIFY', None),
+                'DOCKER_CERT_PATH': os.environ.pop('DOCKER_CERT_PATH', None),
+            }
+            try:
+                try:
+                    self.docker_client = docker.DockerClient(base_url=f"unix://{sock}")
+                    self.docker_client.ping()
+                    log.info("✓ Connected to Docker SDK via unix socket")
+                except Exception as e:
+                    tried.append(f"unix_socket_error: {e}")
+                    self.docker_client = None
+            finally:
+                # Restore environment
+                for k, v in saved_env.items():
+                    if v is not None:
+                        os.environ[k] = v
+
+        # Store the socket path for use by the requests_unixsocket helpers.
+        self.sock_path = sock
+
+        # If unix socket path didn't work, fall back to docker.from_env()
+        if not getattr(self, 'docker_client', None):
+            try:
+                self.docker_client = docker.from_env()
+                self.docker_client.ping()
+                log.info("✓ Connected to Docker SDK (from_env)")
+            except Exception as e:
+                tried.append(f"from_env_error: {e}")
+                log.warning("Failed to connect to Docker SDK", error="; ".join(tried))
+                self.docker_client = None
+
+        # If SDK failed but requests_unixsocket is available, prepare a
+        # session that can talk to the engine via the host socket. This is
+        # used as a lightweight HTTP fallback (pause/unpause/inspect).
+        self.rs_session = None
+        if not getattr(self, 'docker_client', None) and requests_unixsocket and os.path.exists(sock):
+            try:
+                session = requests_unixsocket.Session()
+                sock_url = quote(sock, safe='')
+                # _ping returns OK when the engine is reachable
+                resp = session.get(f"http+unix://{sock_url}/_ping", timeout=2)
+                if resp.status_code == 200 and resp.text.strip().upper().startswith("OK"):
+                    self.rs_session = session
+                    log.info("✓ Connected to Docker via requests_unixsocket")
+                else:
+                    log.debug("requests_unixsocket ping failed", status_code=getattr(resp, 'status_code', None))
+            except Exception as e:
+                log.debug("requests_unixsocket unavailable", error=str(e))
+
+    # ADD THIS METHOD so the loop in get_running_containers doesn't fail
+    def _is_ignored_container_name(self, name: str) -> bool:
+        """Return True when container name should be excluded."""
+        return bool(name) and any(name.startswith(prefix) for prefix in self.ignored_prefixes)
+
+    def _rs_url(self, path: str) -> str:
+        """Build a requests_unixsocket URL for the given engine path."""
+        # path must start with '/'
+        if not path.startswith('/'):
+            path = '/' + path
+        return f"http+unix://{quote(self.sock_path, safe='')}{path}"
+
+    # ... keep the rest of the code you provided ...
+
+    def get_running_containers(self) -> List[Dict]:
+        """Original logic for fetching containers"""
+        container_list: List[Dict[str, Any]] = []
+
+        # Prefer SDK when available
+        if self.docker_client:
+            try:
+                sdk_containers = self.docker_client.containers.list()
+                for container in sdk_containers:
+                    if self._is_ignored_container_name(container.name):
+                        continue
+
+                    baseline_score, findings = self._assess_runtime_risk(container)
+                    is_paused = bool((container.attrs or {}).get("State", {}).get("Paused", False))
+
+                    container_list.append({
+                        'container_id': container.short_id,
+                        'full_id': container.id,
+                        'name': container.name,
+                        'image': container.image.tags if container.image.tags else 'unknown',
+                        'status': 'quarantined' if is_paused else container.status,
+                        'quarantined': is_paused or container.id in self.quarantined_containers,
+                        'risk_level': self._score_to_level(baseline_score),
+                        'risk_score': baseline_score,
+                        'alert_count': 0,
+                        'runtime_findings': findings,
+                    })
+                return container_list
+            except Exception as e:
+                log.warning("Error querying containers via SDK, falling back to CLI", error=str(e))
+
+        # If a requests_unixsocket session is available, use the Engine API
+        # to list containers without requiring the docker binary or SDK.
+        if getattr(self, 'rs_session', None):
+            try:
+                # Default containers/json (without all=1) returns only running
+                # containers which matches the behavior we want for runtime
+                # inspection. Using all=1 includes stopped/exited containers and
+                # inflates the running-count.
+                url = self._rs_url('/containers/json')
+                resp = self.rs_session.get(url, timeout=5)
+                if resp.status_code != 200:
+                    log.warning("containers/json returned non-200", status=resp.status_code)
+                    return []
+
+                inspect_list = resp.json()
+                for c in inspect_list:
+                    name = ''
+                    # Docker API returns Names as a list
+                    names = c.get('Names') or []
+                    if isinstance(names, list) and names:
+                        name = names[0].lstrip('/')
+                    short_id = (c.get('Id') or '')[:12]
+                    image = c.get('Image') or 'unknown'
+                    status = c.get('Status') or c.get('State', '')
+
+                    if self._is_ignored_container_name(name):
+                        continue
+
+                    baseline_score, findings = self._assess_runtime_risk_from_cli(short_id, {})
+                    is_paused = (c.get('State') or '').lower() == 'paused' or 'Paused' in status
+
+                    container_list.append({
+                        'container_id': short_id,
+                        'full_id': c.get('Id', ''),
+                        'name': name,
+                        'image': image,
+                        'status': 'quarantined' if is_paused else status,
+                        'quarantined': is_paused or short_id in self.quarantined_containers,
+                        'risk_level': self._score_to_level(baseline_score),
+                        'risk_score': baseline_score,
+                        'alert_count': 0,
+                        'runtime_findings': findings,
+                    })
+                return container_list
+            except Exception as e:
+                log.warning("Error querying containers via requests_unixsocket", error=str(e))
+
+        # CLI fallback: use `docker ps` and `docker inspect` to build the list when
+        # the SDK and requests_unixsocket are unavailable.
         try:
-            log.info("Connecting to Docker SDK via direct Unix socket...")
-            # We use APIClient instead of from_env() to avoid the http+docker transport bug
-            self.docker_client = docker.APIClient(base_url='unix:///var/run/docker.sock')
-            self.docker_client.version() # Test connection
-            log.info("✓ Connected to Docker SDK successfully")
+            result = subprocess.run(
+                ["docker", "ps", "--no-trunc", "--format", "{{json .}}"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                log.warning("docker ps failed", stderr=(result.stderr or "").strip())
+                return []
+
+            inspect_cache: Dict[str, Dict] = {}
+            for line in result.stdout.splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    info = json.loads(line)
+                    short_id = info.get('ID')
+                    name = info.get('Names') or info.get('Name') or ''
+                    image = info.get('Image') or 'unknown'
+                    status = info.get('Status') or 'unknown'
+
+                    if self._is_ignored_container_name(name):
+                        continue
+
+                    # Use inspect-based scoring when possible
+                    baseline_score, findings = self._assess_runtime_risk_from_cli(short_id, inspect_cache)
+
+                    is_paused = 'Paused' in status
+
+                    container_list.append({
+                        'container_id': short_id,
+                        'full_id': inspect_cache.get(short_id, {}).get('Id', ''),
+                        'name': name,
+                        'image': image,
+                        'status': 'quarantined' if is_paused else status,
+                        'quarantined': is_paused or short_id in self.quarantined_containers,
+                        'risk_level': self._score_to_level(baseline_score),
+                        'risk_score': baseline_score,
+                        'alert_count': 0,
+                        'runtime_findings': findings,
+                    })
+                except Exception:
+                    continue
+            return container_list
         except Exception as e:
-            log.error("Failed to connect to Docker SDK", error=str(e))
-            self.docker_client = None
+            log.warning("Error querying containers via CLI fallback", error=str(e))
+            return []
 
     def get_container_id_from_pid(self, pid: int) -> Optional[str]:
         """Resolves PID to Container ID using cgroups"""
@@ -46,6 +251,13 @@ class ContainerManager:
         except Exception:
             return None
         return None
+    
+    async def get_container_by_pid(self, pid: int) -> Optional[Dict[str, Any]]:
+        """Get container info by PID (async wrapper for compatibility)"""
+        container_id = self.get_container_id_from_pid(pid)
+        if container_id:
+            return self.get_container_info(container_id)
+        return None
 
     # Keep your existing quarantine/risk scoring methods below...
 
@@ -54,17 +266,38 @@ class ContainerManager:
         if container_id in self.container_info_cache:
             return self.container_info_cache[container_id]
 
-        if not self.docker_client:
-            return {"container_id": container_id, "name": "unknown"}
+        # If SDK is available prefer it for single-item fetches
+        if self.docker_client:
+            try:
+                container = self.docker_client.containers.get(container_id)
+                info = {
+                    'container_id': container.short_id,
+                    'full_id': container.id,
+                    'name': container.name,
+                    'image': container.image.tags if container.image.tags else 'unknown',
+                    'status': container.status,
+                }
+                self.container_info_cache[container_id] = info
+                return info
+            except Exception:
+                # Fall back to CLI inspect
+                pass
 
+        # CLI fallback inspect
         try:
-            container = self.docker_client.containers.get(container_id)
+            inspect_data = self._inspect_container(container_id)
+            if not inspect_data:
+                return {"container_id": container_id, "name": "unknown"}
+
+            name = inspect_data.get('Name', '').lstrip('/')
+            image = inspect_data.get('Config', {}).get('Image', 'unknown')
+            status = inspect_data.get('State', {}).get('Status', 'unknown')
             info = {
-                'container_id': container.short_id,
-                'full_id': container.id,
-                'name': container.name,
-                'image': container.image.tags if container.image.tags else 'unknown',
-                'status': container.status,
+                'container_id': container_id,
+                'full_id': inspect_data.get('Id', ''),
+                'name': name,
+                'image': image,
+                'status': status,
             }
             self.container_info_cache[container_id] = info
             return info
@@ -73,108 +306,10 @@ class ContainerManager:
 
     # ... Keep your existing get_running_containers, quarantine, etc. methods below ...
     
-    def get_running_containers(self) -> List[Dict]:
-        """
-        Get list of all running containers from Docker
-        Returns container info including ID, name, status
-        
-        Tries multiple methods depending on OS:
-        - Docker Python SDK (all platforms)
-        - Docker CLI (all platforms if docker is in PATH)
-        - Empty list as fallback (data populated via API or script)
-        """
-        # Try Docker Python SDK first
-        if self.docker_client:
-            try:
-                containers = self.docker_client.containers.list()
-                container_list = []
-                
-                for container in containers:
-                    try:
-                        if self._is_ignored_container_name(container.name):
-                            continue
-
-                        baseline_score, findings = self._assess_runtime_risk(container)
-                        is_paused = bool((container.attrs or {}).get("State", {}).get("Paused", False))
-                        container_list.append({
-                            'container_id': container.short_id,
-                            'full_id': container.id,
-                            'name': container.name,
-                            'image': container.image.tags[0] if container.image.tags else 'unknown',
-                            'status': 'quarantined' if is_paused else container.status,
-                            'quarantined': is_paused or container.id in self.quarantined_containers,
-                            'risk_level': self._score_to_level(baseline_score),
-                            'risk_score': baseline_score,
-                            'alert_count': 0,
-                            'runtime_findings': findings,
-                        })
-                    except Exception as e:
-                        log.warning("Failed to process container", error=str(e))
-                        continue
-                
-                if container_list:
-                    log.info("Found containers via SDK", count=len(container_list), os=self.os_type)
-                    return container_list
-            except Exception as e:
-                log.warning("Error querying Docker SDK", error=str(e))
-        
-        # Try Docker CLI as fallback
-        try:
-            command = ["docker", "ps", "--no-trunc", "--format", "json"]
-            
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0:
-                containers = []
-                inspect_cache: Dict[str, Dict] = {}
-                for line in result.stdout.strip().split('\n'):
-                    if not line:
-                        continue
-                    try:
-                        container_data = json.loads(line)
-                        container_name = container_data.get('Names', '')
-                        if self._is_ignored_container_name(container_name):
-                            continue
-
-                        full_id = container_data.get('ID', '')
-                        baseline_score, findings = self._assess_runtime_risk_from_cli(full_id, inspect_cache)
-                        inspect_data = inspect_cache.get(full_id, {})
-                        is_paused = bool((inspect_data.get("State") or {}).get("Paused", False))
-                        containers.append({
-                            'container_id': full_id[:12],
-                            'full_id': full_id,
-                            'name': container_name,
-                            'image': container_data.get('Image', ''),
-                            'status': 'quarantined' if is_paused else 'running',
-                            'quarantined': is_paused,
-                            'risk_level': self._score_to_level(baseline_score),
-                            'risk_score': baseline_score,
-                            'alert_count': 0,
-                            'runtime_findings': findings,
-                        })
-                    except json.JSONDecodeError:
-                        continue
-                
-                if containers:
-                    log.info("Found containers via CLI", count=len(containers), os=self.os_type)
-                    return containers
-        except FileNotFoundError:
-            log.warning("Docker CLI not found in PATH", os=self.os_type)
-        except Exception as e:
-            log.warning("Error querying Docker CLI", error=str(e), os=self.os_type)
-        
-        # Fallback: Return empty list (containers can be populated via API)
-        log.info("No containers discovered - use API endpoint or script to populate", os=self.os_type)
-        return []
-
-    def _is_ignored_container_name(self, name: str) -> bool:
-        """Return True when container name should be excluded from processing."""
-        return bool(name) and any(name.startswith(prefix) for prefix in self.ignored_prefixes)
+    # NOTE: _is_ignored_container_name is defined earlier in the file and
+    # intentionally only needs a single implementation. This placeholder
+    # exists to keep code readers aware of the helper; the real implementation
+    # lives near the top of the class to ensure callers do not fail.
 
     def _assess_runtime_risk_from_cli(self, container_id: str, inspect_cache: Dict[str, Dict]) -> tuple[int, List[str]]:
         """Compute runtime risk score when Docker SDK is unavailable using `docker inspect`."""
@@ -195,6 +330,16 @@ class ContainerManager:
     def _inspect_container(self, container_id: str) -> Dict:
         """Return parsed docker inspect payload for one container."""
         try:
+            # Prefer requests_unixsocket HTTP call if available (no SDK)
+            if getattr(self, 'rs_session', None):
+                # Use the engine API: /containers/{id}/json
+                from urllib.parse import quote
+                url = f"http+unix://{quote('/var/run/docker.sock', safe='')}/containers/{container_id}/json"
+                resp = self.rs_session.get(url, timeout=3)
+                if resp.status_code == 200:
+                    return resp.json()
+                return {}
+
             result = subprocess.run(
                 ["docker", "inspect", container_id],
                 capture_output=True,
@@ -325,6 +470,21 @@ class ContainerManager:
                 return True
             except Exception as e:
                 log.warning("Could not pause container via SDK", error=str(e), container_id=container_id)
+        # Try requests_unixsocket Engine API when available
+        if getattr(self, 'rs_session', None):
+            try:
+                url = self._rs_url(f"/containers/{container_id}/pause")
+                resp = self.rs_session.post(url, timeout=5)
+                if resp.status_code in (200, 204):
+                    log.info("Container paused", container_id=container_id, method="rs_http")
+                    return True
+                # Some engines may return 500/409 when already paused; treat 409 as success
+                if resp.status_code == 409:
+                    log.info("Container already paused (rs_http)", container_id=container_id)
+                    return True
+                log.error("Pause via rs_http failed", status=resp.status_code, body=resp.text[:200])
+            except Exception as e:
+                log.warning("Pause via rs_http exception", error=str(e), container_id=container_id)
 
         # CLI fallback for environments where SDK is unavailable
         try:
@@ -349,27 +509,54 @@ class ContainerManager:
     
     def _disconnect_network(self, container_id: str) -> bool:
         """Disconnect container from network"""
-        if not self.docker_client:
-            return False
-        
+        # Prefer SDK if available
+        if self.docker_client:
+            try:
+                container = self.docker_client.containers.get(container_id)
+                networks = list(container.attrs['NetworkSettings']['Networks'].keys())
+                for network_name in networks:
+                    try:
+                        self.docker_client.networks.get(network_name).disconnect(container_id)
+                        log.info("Disconnected from network", container_id=container_id, network=network_name)
+                    except Exception as e:
+                        log.warning("Could not disconnect from network", error=str(e))
+                return True
+            except Exception as e:
+                log.error("Could not disconnect network via SDK", error=str(e))
+
+        # Try requests_unixsocket Engine API
+        if getattr(self, 'rs_session', None):
+            try:
+                # Inspect container to find connected networks
+                data = self._inspect_container(container_id)
+                networks = list((data.get('NetworkSettings') or {}).get('Networks', {}).keys())
+                for network_name in networks:
+                    if network_name == 'host':
+                        # Cannot disconnect host network
+                        continue
+                    try:
+                        url = self._rs_url(f"/networks/{network_name}/disconnect")
+                        body = {'Container': container_id, 'Force': False}
+                        resp = self.rs_session.post(url, json=body, timeout=5)
+                        if resp.status_code in (200, 204):
+                            log.info("Disconnected from network", container_id=container_id, network=network_name)
+                        else:
+                            log.warning("Failed to disconnect network via rs_http", network=network_name, status=resp.status_code)
+                    except Exception as e:
+                        log.warning("Exception disconnecting network via rs_http", error=str(e))
+                return True
+            except Exception as e:
+                log.error("Could not disconnect network via rs_http", error=str(e))
+
+        # As a last resort, try CLI (may not be present in container image)
         try:
-            container = self.docker_client.containers.get(container_id)
-            
-            # Get all connected networks
-            networks = list(container.attrs['NetworkSettings']['Networks'].keys())
-            
-            # Disconnect from all networks
-            for network_name in networks:
-                try:
-                    self.docker_client.networks.get(network_name).disconnect(container_id)
-                    log.info("Disconnected from network", container_id=container_id, network=network_name)
-                except Exception as e:
-                    log.warning("Could not disconnect from network", error=str(e))
-            
-            return True
-        except Exception as e:
-            log.error("Could not disconnect network", error=str(e))
-            return False
+            result = subprocess.run(["docker", "network", "disconnect", "-f", "bridge", container_id], capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                log.info("Disconnected from default bridge network via CLI", container_id=container_id)
+                return True
+        except Exception:
+            pass
+        return False
     
     def unquarantine(self, container_id: str) -> bool:
         """Restore a quarantined container (manual approval required)"""
@@ -382,6 +569,25 @@ class ContainerManager:
                 self.quarantined_containers.discard(target_id[:12])
                 log.info("Container unquarantined", container_id=target_id)
                 return True
+
+            # Try requests_unixsocket Engine API
+            if getattr(self, 'rs_session', None):
+                try:
+                    url = self._rs_url(f"/containers/{target_id}/unpause")
+                    resp = self.rs_session.post(url, timeout=5)
+                    if resp.status_code in (200, 204):
+                        self.quarantined_containers.discard(target_id)
+                        self.quarantined_containers.discard(target_id[:12])
+                        log.info("Container unquarantined", container_id=target_id, method="rs_http")
+                        return True
+                    if resp.status_code == 409:
+                        # Not paused
+                        self.quarantined_containers.discard(target_id)
+                        self.quarantined_containers.discard(target_id[:12])
+                        log.info("Container not paused when unquarantine attempted", container_id=target_id)
+                        return True
+                except Exception as e:
+                    log.warning("Unpause via rs_http exception", error=str(e), container_id=target_id)
 
             result = subprocess.run(
                 ["docker", "unpause", target_id],
@@ -411,6 +617,15 @@ class ContainerManager:
         if self.docker_client:
             try:
                 return self.docker_client.containers.get(container_id).id
+            except Exception:
+                pass
+        # If requests_unixsocket is available, inspect via Engine API and return
+        # the canonical long ID when possible.
+        if getattr(self, 'rs_session', None):
+            try:
+                data = self._inspect_container(container_id)
+                if data and data.get('Id'):
+                    return data.get('Id')
             except Exception:
                 pass
         return container_id

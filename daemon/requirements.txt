@@ -6,5 +6,7 @@ structlog==24.1.0
 # libbpf-tools==0.7.0
 # pylibbpf==0.6.5
 # Inside daemon/Dockerfile or requirements.txt
-docker==7.0.0
-urllib3<2.0.0
+docker==6.1.3
+urllib3==1.26.15
+requests==2.31.0
+    

@@ -176,9 +176,35 @@ class BackendAPIClient:
             async with self.session.get(url, headers=self._get_headers()) as resp:
                 self.request_count += 1
                 return resp.status == 200
-                    
+                     
         except Exception as e:
             logger.error(f'Health check failed: {e}')
+            self.error_count += 1
+            return False
+    
+    async def sync_containers(self, containers: List[Dict[str, Any]]) -> bool:
+        """Sync running containers to backend"""
+        try:
+            if not self.session:
+                raise RuntimeError('Client not initialized. Use async with statement.')
+            
+            url = f'{self.base_url}/api/containers/sync'
+            async with self.session.post(
+                url,
+                json={'containers': containers},
+                headers=self._get_headers()
+            ) as resp:
+                self.request_count += 1
+                if resp.status in (200, 201):
+                    logger.debug(f'Containers synced: {len(containers)} containers')
+                    return True
+                else:
+                    logger.error(f'Failed to sync containers: {resp.status}')
+                    self.error_count += 1
+                    return False
+                     
+        except Exception as e:
+            logger.error(f'Error syncing containers: {e}')
             self.error_count += 1
             return False
     
