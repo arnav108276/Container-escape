@@ -73,6 +73,8 @@ const defaultMetrics: SystemMetrics = {
   lastUpdated: new Date().toISOString(),
 };
 
+const isEqual = <T>(left: T, right: T) => JSON.stringify(left) === JSON.stringify(right);
+
 export const useSystemMetrics = create<MetricsStore>(
   (set: (fn: (state: MetricsStore) => Partial<MetricsStore>) => void) => ({
     metrics: defaultMetrics,
@@ -81,13 +83,19 @@ export const useSystemMetrics = create<MetricsStore>(
     alerts: [],
 
     setMetrics: (newMetrics: Partial<SystemMetrics>) =>
-      set((state: MetricsStore) => ({
-        metrics: {
+      set((state: MetricsStore) => {
+        const mergedMetrics = {
           ...state.metrics,
           ...newMetrics,
-          lastUpdated: new Date().toISOString(),
-        },
-      })),
+        };
+        if (isEqual(state.metrics, mergedMetrics)) return {};
+        return {
+          metrics: {
+            ...mergedMetrics,
+            lastUpdated: new Date().toISOString(),
+          },
+        };
+      }),
 
     addEvent: (event: SecurityEvent) =>
       set((state: MetricsStore) => {
@@ -104,7 +112,8 @@ export const useSystemMetrics = create<MetricsStore>(
         };
       }),
 
-    setEvents: (events: SecurityEvent[]) => set(() => ({ events })),
+    setEvents: (events: SecurityEvent[]) =>
+      set((state: MetricsStore) => (isEqual(state.events, events) ? {} : { events })),
 
     addContainer: (container: Container) =>
       set((state: MetricsStore) => ({
@@ -116,13 +125,17 @@ export const useSystemMetrics = create<MetricsStore>(
       })),
 
     setContainers: (containers: Container[]) =>
-      set((state: MetricsStore) => ({
-        containers,
-        metrics: {
+      set((state: MetricsStore) => {
+        const nextMetrics = {
           ...state.metrics,
           totalContainers: containers.length,
-        },
-      })),
+        };
+        if (isEqual(state.containers, containers) && isEqual(state.metrics, nextMetrics)) return {};
+        return {
+          containers,
+          metrics: nextMetrics,
+        };
+      }),
 
     addAlert: (alert: Alert) =>
       set((state: MetricsStore) => ({
@@ -134,13 +147,17 @@ export const useSystemMetrics = create<MetricsStore>(
       })),
 
     setAlerts: (alerts: Alert[]) =>
-      set((state: MetricsStore) => ({
-        alerts,
-        metrics: {
+      set((state: MetricsStore) => {
+        const nextMetrics = {
           ...state.metrics,
           activeAlerts: alerts.filter((a: Alert) => a.status === 'new').length,
-        },
-      })),
+        };
+        if (isEqual(state.alerts, alerts) && isEqual(state.metrics, nextMetrics)) return {};
+        return {
+          alerts,
+          metrics: nextMetrics,
+        };
+      }),
 
     updateContainerRisk: (containerId: string, riskScore: number) =>
       set((state: MetricsStore) => ({

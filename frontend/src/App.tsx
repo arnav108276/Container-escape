@@ -55,6 +55,9 @@ function App() {
     let ws: WebSocket | null = null;
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
+    let reconnectAttempts = 0;
+    let connectionTimer: ReturnType<typeof setTimeout> | null = null;
+    let disconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const connectWebSocket = () => {
       if (disposed) return;
@@ -68,13 +71,18 @@ function App() {
 
       ws.onopen = () => {
         console.log("WebSocket connected");
-        setIsConnected(true);
+        reconnectAttempts = 0;
+        if (disconnectTimer) clearTimeout(disconnectTimer);
+        connectionTimer = setTimeout(() => setIsConnected(true), 400);
       };
 
       ws.onclose = () => {
         if (disposed) return;
-        setIsConnected(false);
-        reconnectTimeout = setTimeout(connectWebSocket, 3000);
+        if (connectionTimer) clearTimeout(connectionTimer);
+        disconnectTimer = setTimeout(() => setIsConnected(false), 1000);
+        const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
+        reconnectAttempts += 1;
+        reconnectTimeout = setTimeout(connectWebSocket, delay);
       };
 
       ws.onerror = (error) => {
@@ -88,6 +96,8 @@ function App() {
       disposed = true;
       if (ws) ws.close();
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (connectionTimer) clearTimeout(connectionTimer);
+      if (disconnectTimer) clearTimeout(disconnectTimer);
     };
   }, []);
 
@@ -127,12 +137,12 @@ function App() {
 
   return (
     <Router>
-      <div className="flex h-screen bg-background text-foreground overflow-hidden">
+      <div className="flex h-screen bg-background text-foreground overflow-visible">
         {/* Sidebar */}
         <Sidebar />
 
         {/* Right Side Layout */}
-        <div className="flex flex-col flex-1 overflow-hidden">
+        <div className="flex flex-col flex-1 overflow-visible">
           {/* Top Navigation */}
           <Navigation isConnected={isConnected} />
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSystemMetrics, SecurityEvent } from '../store';
 
 const getRiskColor = (riskLevel: string) => {
@@ -32,11 +32,20 @@ const getActionColor = (action: string) => {
 const EventsDisplay: React.FC = () => {
   const { events, addEvent } = useSystemMetrics();
   const [wsConnected, setWsConnected] = useState(false);
+  const addEventRef = useRef(addEvent);
+
+  useEffect(() => {
+    addEventRef.current = addEvent;
+  }, [addEvent]);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let reconnectAttempts = 0;
+    let disposed = false;
 
     const connectWebSocket = () => {
+      if (disposed) return;
       let wsUrl = import.meta.env.VITE_WS_URL;
       if (!wsUrl) {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -46,13 +55,14 @@ const EventsDisplay: React.FC = () => {
 
       ws.onopen = () => {
         setWsConnected(true);
+        reconnectAttempts = 0;
         console.log('Events WebSocket connected');
       };
 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          addEvent({
+          addEventRef.current({
             id: Math.random().toString(36).substr(2, 9),
             timestamp: new Date().toISOString(),
             ...data,
@@ -63,17 +73,22 @@ const EventsDisplay: React.FC = () => {
       };
 
       ws.onclose = () => {
+        if (disposed) return;
         setWsConnected(false);
-        setTimeout(connectWebSocket, 3000);
+        const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
+        reconnectAttempts += 1;
+        reconnectTimeout = setTimeout(connectWebSocket, delay);
       };
     };
 
     connectWebSocket();
 
     return () => {
+      disposed = true;
       if (ws) ws.close();
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
     };
-  }, [addEvent]);
+  }, []);
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow">

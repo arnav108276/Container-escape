@@ -52,6 +52,7 @@ export default function ReportGenerator() {
   const [scheduleFrequency, setScheduleFrequency] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [scheduleTimeOfDay, setScheduleTimeOfDay] = useState('08:00');
   const [scheduleRecipients, setScheduleRecipients] = useState('');
+  const [scheduleActionLoading, setScheduleActionLoading] = useState(false);
 
   useEffect(() => {
     fetchSchedules();
@@ -123,6 +124,7 @@ export default function ReportGenerator() {
       .map((value) => value.trim())
       .filter(Boolean);
 
+    setScheduleActionLoading(true);
     setStatusMessage('Creating scheduled report...');
     try {
       await apiClient.createReportSchedule({
@@ -138,26 +140,34 @@ export default function ReportGenerator() {
       fetchSchedules();
     } catch (error) {
       setStatusMessage('Failed to create scheduled report.');
+    } finally {
+      setScheduleActionLoading(false);
     }
   };
 
   const handleDeleteSchedule = async (scheduleId: string) => {
+    setScheduleActionLoading(true);
     try {
       await apiClient.deleteReportSchedule(scheduleId);
       setStatusMessage('Scheduled report deleted.');
       fetchSchedules();
     } catch (error) {
       setStatusMessage('Failed to delete the scheduled report.');
+    } finally {
+      setScheduleActionLoading(false);
     }
   };
 
   const handleRunScheduleNow = async (scheduleId: string) => {
+    setScheduleActionLoading(true);
     try {
       await apiClient.runReportSchedule(scheduleId);
       setStatusMessage('Scheduled report executed immediately.');
       fetchSchedules();
     } catch (error) {
       setStatusMessage('Failed to run scheduled report.');
+    } finally {
+      setScheduleActionLoading(false);
     }
   };
 
@@ -279,8 +289,8 @@ export default function ReportGenerator() {
               </div>
             </div>
 
-            <Button variant="default" onClick={handleCreateSchedule} disabled={scheduleLoading}>
-              {scheduleLoading ? 'Scheduling...' : 'Create Schedule'}
+            <Button variant="default" onClick={handleCreateSchedule} disabled={scheduleLoading || scheduleActionLoading}>
+              {scheduleLoading || scheduleActionLoading ? 'Scheduling...' : 'Create Schedule'}
             </Button>
 
             <div className="rounded-2xl border border-border bg-card p-4">
@@ -304,10 +314,10 @@ export default function ReportGenerator() {
                           </p>
                         </div>
                         <div className="space-x-2">
-                          <Button size="sm" variant="outline" onClick={() => handleRunScheduleNow(schedule.schedule_id)}>
+                          <Button size="sm" variant="outline" onClick={() => handleRunScheduleNow(schedule.schedule_id)} disabled={scheduleActionLoading}>
                             Run now
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => handleDeleteSchedule(schedule.schedule_id)}>
+                          <Button size="sm" variant="ghost" onClick={() => handleDeleteSchedule(schedule.schedule_id)} disabled={scheduleActionLoading}>
                             Delete
                           </Button>
                         </div>
