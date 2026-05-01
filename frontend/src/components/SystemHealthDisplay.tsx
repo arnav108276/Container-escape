@@ -41,9 +41,6 @@ const SystemHealthDisplay: React.FC = () => {
     };
 
     fetchHealth();
-    const interval = setInterval(fetchHealth, 5000);
-
-    return () => clearInterval(interval);
   }, [setMetrics]);
 
   if (loading || !health) {
