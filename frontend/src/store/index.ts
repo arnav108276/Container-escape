@@ -1,2 +1,2 @@
 export * from './systemMetrics';
-export * from './dashboardStore';
+export * from './themeStore';

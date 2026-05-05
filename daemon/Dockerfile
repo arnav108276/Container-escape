@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     python3-bpfcc libbpfcc-dev linux-libc-dev \
     ca-certificates gnupg lsb-release python3-pip python3-dev \
     flex bison libssl-dev libelf-dev bc \
+    && curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh \
     && rm -rf /var/lib/apt/lists/*
 
 # 3. Embed WSL2 Kernel Headers safely (BCC needs these at runtime!)

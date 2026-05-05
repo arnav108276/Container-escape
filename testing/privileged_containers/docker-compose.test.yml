@@ -1,0 +1,29 @@
+services:
+  escaper:
+    build: ./escaper
+    container_name: threat-escaper
+    privileged: true
+    volumes:
+      - /:/host:ro
+
+  miner:
+    build: ./miner
+    container_name: threat-miner
+    cpus: 0.5
+    mem_limit: 100mb
+
+  scanner:
+    build: ./scanner
+    container_name: threat-scanner
+    network_mode: host
+
+  shell:
+    build: ./shell
+    container_name: threat-shell
+
+  privesc:
+    build: ./privesc
+    container_name: threat-privesc
+    cap_add:
+      - SYS_ADMIN
+      - SETUID

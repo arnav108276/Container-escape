@@ -56,7 +56,7 @@ function App() {
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
 
-    const connectWebSocket = () => {
+    const connectWebSocket = (attempt = 0) => {
       if (disposed) return;
       let wsUrl = import.meta.env.VITE_WS_URL;
       if (!wsUrl) {
@@ -74,7 +74,9 @@ function App() {
       ws.onclose = () => {
         if (disposed) return;
         setIsConnected(false);
-        reconnectTimeout = setTimeout(connectWebSocket, 3000);
+        const nextAttempt = attempt + 1;
+        const delay = Math.min(30000, 2000 * Math.pow(1.5, attempt)); 
+        reconnectTimeout = setTimeout(() => connectWebSocket(nextAttempt), delay);
       };
 
       ws.onerror = (error) => {

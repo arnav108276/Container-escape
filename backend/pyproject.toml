@@ -15,7 +15,13 @@ dependencies = [
     "python-multipart==0.0.6",
     "httpx==0.25.2",
     "PyJWT==2.10.1",
+    "docker>=7.0.0",
+    "requests-unixsocket>=0.3.0",
 ]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [tool.uv]
 dev-dependencies = [

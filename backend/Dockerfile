@@ -14,7 +14,7 @@ COPY pyproject.toml ./
 # Install Python dependencies into isolated environment
 RUN uv venv /app/.venv && \
     . /app/.venv/bin/activate && \
-    uv pip install --no-cache -r pyproject.toml
+    uv pip install --no-cache .
 
 # =============================================================================
 # Stage 2: Production - Minimal runtime image

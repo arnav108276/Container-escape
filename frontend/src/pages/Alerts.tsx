@@ -33,8 +33,8 @@ export default function Alerts() {
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [minSeverity, setMinSeverity] = useState("high");
 
-  const fetchAlerts = async () => {
-    setLoading(true);
+  const fetchAlerts = async (isInitial = false) => {
+    if (isInitial) setLoading(true);
     setErrorMessage("");
     try {
       const [alertsResponse, summaryResponse] = await Promise.all([
@@ -43,22 +43,29 @@ export default function Alerts() {
       ]);
       setAlerts(alertsResponse.data.alerts || []);
       setSummary(summaryResponse.data || null);
-      setSelectedAlerts(new Set());
+    } catch (error) {
+      console.error("Failed to fetch alerts:", error);
+      setErrorMessage("Failed to load alerts. Please verify backend connectivity.");
+    } finally {
+      if (isInitial) setLoading(false);
+    }
+  };
+
+  const fetchNotificationConfig = async () => {
+    try {
       const notificationResponse = await apiClient.getNotificationConfig();
       setEmailRecipients((notificationResponse.data?.recipients || []).join(", "));
       setEmailEnabled(Boolean(notificationResponse.data?.enabled));
       setMinSeverity(notificationResponse.data?.min_severity || "high");
     } catch (error) {
-      console.error("Failed to fetch alerts:", error);
-      setErrorMessage("Failed to load alerts. Please verify backend connectivity.");
-    } finally {
-      setLoading(false);
+      console.error("Failed to fetch notification config:", error);
     }
   };
 
   useEffect(() => {
-    fetchAlerts();
-    const interval = setInterval(fetchAlerts, 5000);
+    fetchAlerts(true);
+    fetchNotificationConfig();
+    const interval = setInterval(() => fetchAlerts(false), 5000);
     return () => clearInterval(interval);
   }, [includeAcknowledged]);
 

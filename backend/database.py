@@ -2,7 +2,7 @@
 
 import structlog
 from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure
+from pymongo.errors import ConnectionFailure, OperationFailure
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
@@ -22,6 +22,7 @@ class Database:
         """Connect to MongoDB and initialize collections"""
         try:
             self.client = MongoClient(self.mongodb_uri, serverSelectionTimeoutMS=5000)
+            # This triggers authentication
             self.client.admin.command('ping')
             
             self.db = self.client[self.db_name]
@@ -29,9 +30,9 @@ class Database:
             # Create collections with indexes
             self._create_indexes()
             
-            log.info("Connected to MongoDB", uri=self.mongodb_uri)
+            log.info("Connected to MongoDB", uri=self.mongodb_uri.split("@")[-1] if "@" in self.mongodb_uri else self.mongodb_uri)
             return True
-        except ConnectionFailure as e:
+        except (ConnectionFailure, OperationFailure) as e:
             log.error("Failed to connect to MongoDB", error=str(e))
             return False
     

@@ -6,6 +6,7 @@ from bson import ObjectId
 import structlog
 from datetime import datetime, timedelta
 import subprocess
+from container_manager import ContainerManager
 
 from filtering import is_ignored_container
 from auth import require_role
@@ -72,7 +73,7 @@ def _get_container_manager(app_state):
         return app_state.container_manager
 
     try:
-        from daemon.container_manager import ContainerManager  # type: ignore
+        from container_manager import ContainerManager
 
         app_state.container_manager = ContainerManager()
         return app_state.container_manager

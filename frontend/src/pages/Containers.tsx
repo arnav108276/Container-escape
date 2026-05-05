@@ -97,106 +97,91 @@ export default function Containers() {
     if (!vulnerabilities[containerId]) fetchVulnerabilities(containerId);
   };
 
-  const getRiskColor = (risk: string) => {
-    switch (risk) {
-      case 'CRITICAL':
-        return 'bg-rose-500/20 text-rose-200 border border-rose-300/40';
-      case 'HIGH':
-        return 'bg-orange-500/20 text-orange-200 border border-orange-300/40';
-      case 'MEDIUM':
-        return 'bg-amber-500/20 text-amber-200 border border-amber-300/40';
-      case 'SAFE':
-        return 'bg-emerald-700/20 text-emerald-200 border border-emerald-300/40';
-      default:
-        return 'bg-emerald-500/20 text-emerald-200 border border-emerald-300/40';
-    }
-  };
-
-  const getRiskLabel = (container: Container) => {
-    if ((container.risk_level === 'LOW' || container.risk_level === 'SAFE') && container.alert_count === 0) {
-      return 'SAFE';
-    }
-    return container.risk_level;
-  };
-
-  const getStatusColor = (status: string) => {
-    return status === 'quarantined' ? 'text-rose-300' : status === 'running' ? 'text-emerald-300' : 'text-slate-300';
-  };
-
-  const getCategoryColor = (category: string) => {
-    switch (category) {
-      case 'CRITICAL':
-        return 'text-rose-300 bg-rose-950/50';
-      case 'HIGH':
-        return 'text-orange-300 bg-orange-950/50';
-      case 'MEDIUM':
-        return 'text-amber-300 bg-amber-950/50';
-      default:
-        return 'text-emerald-300 bg-emerald-950/50';
-    }
-  };
-
   return (
-    <div className="space-y-8">
-      <h1 className="text-4xl font-bold text-cyan-100">Containers</h1>
+    <div className="space-y-10">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-4xl font-extrabold text-white tracking-tight">Fleet Intelligence</h1>
+        <p className="text-blue-400 font-medium">Monitoring runtime integrity and workload isolation across the fleet.</p>
+      </div>
 
-      {successMessage && <div className="rounded-lg border border-emerald-700 bg-emerald-950/40 p-4 text-emerald-200">{successMessage}</div>}
-      {errorMessage && <div className="rounded-lg border border-rose-700 bg-rose-950/40 p-4 text-rose-200">{errorMessage}</div>}
+      {successMessage && <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-emerald-400 font-bold text-xs uppercase tracking-widest">{successMessage}</div>}
+      {errorMessage && <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-4 text-rose-400 font-bold text-xs uppercase tracking-widest">{errorMessage}</div>}
 
       {loading ? (
-        <div className="py-8 text-center">Loading...</div>
+        <div className="py-20 text-center text-blue-400 font-bold animate-pulse uppercase tracking-[0.3em]">SYNCHRONIZING FLEET DATA...</div>
       ) : containers.length === 0 ? (
-        <div className="rounded-xl border border-slate-700 bg-slate-900 p-12 text-center text-slate-400">No containers</div>
+        <div className="rounded-2xl border border-white/5 bg-white/5 backdrop-blur-md p-20 text-center">
+           <p className="text-xs font-black text-gray-600 uppercase tracking-widest">No active workloads detected in this sector.</p>
+        </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-700 bg-slate-900 p-2">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-700">
-              <tr className="text-slate-400">
-                <th className="pb-4 pl-4 font-semibold">Container ID</th>
-                <th className="pb-4 font-semibold">Status</th>
-                <th className="pb-4 font-semibold">Risk Level</th>
-                <th className="pb-4 font-semibold">Alerts</th>
-                <th className="pb-4 pr-4 font-semibold">Actions</th>
+        <div className="rounded-2xl border border-white/5 bg-white/5 backdrop-blur-md overflow-hidden">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-white/5 border-b border-white/5">
+                <th className="px-6 py-5 text-[10px] font-black text-gray-500 uppercase tracking-widest">Identity</th>
+                <th className="px-6 py-5 text-[10px] font-black text-gray-500 uppercase tracking-widest">Runtime Status</th>
+                <th className="px-6 py-5 text-[10px] font-black text-gray-500 uppercase tracking-widest">Threat Index</th>
+                <th className="px-6 py-5 text-[10px] font-black text-gray-500 uppercase tracking-widest">Alert Count</th>
+                <th className="px-6 py-5 text-[10px] font-black text-gray-500 uppercase tracking-widest text-right">Intervention</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800">
+            <tbody className="divide-y divide-white/5">
               {containers.map((container: Container) => (
                 <tr
                   key={container.container_id}
-                  className="relative transition hover:bg-slate-800/80"
+                  className="group relative transition-colors hover:bg-white/5"
                   onMouseEnter={() => handleContainerHover(container.container_id)}
                   onMouseLeave={() => setHoveredContainer(null)}
                 >
-                  <td className="py-4 pl-4">
-                    <div>
-                      <div className="font-semibold text-slate-100">{container.name || 'Unnamed'}</div>
-                      <div className="text-xs text-slate-400">{container.container_id.slice(0, 12)}</div>
-                    </div>
+                  <td className="px-6 py-5">
+                    <div className="font-bold text-white tracking-tight group-hover:text-blue-400 transition-colors">{container.name || 'Unnamed workload'}</div>
+                    <div className="text-[10px] text-gray-500 font-mono uppercase tracking-tighter mt-1">{container.container_id.slice(0, 12)}</div>
                   </td>
-                  <td className={`py-4 ${getStatusColor(container.status)}`}>{container.status}</td>
-                  <td className="relative py-4 group">
-                    <span className={`cursor-help rounded-full px-3 py-1 text-xs font-semibold ${getRiskColor(container.risk_level)}`}>{getRiskLabel(container)}</span>
+                  <td className="px-6 py-5">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${
+                      container.status === 'quarantined' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 
+                      container.status === 'running' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
+                      'bg-white/5 text-gray-400 border-white/10'
+                    }`}>
+                      {container.status}
+                    </span>
+                  </td>
+                  <td className="relative px-6 py-5 group/risk">
+                    <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${
+                      container.risk_level === 'CRITICAL' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 
+                      container.risk_level === 'HIGH' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 
+                      'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                    }`}>
+                      {container.risk_level}
+                    </span>
 
                     {hoveredContainer === container.container_id && vulnerabilities[container.container_id] && (
-                      <div className="absolute left-0 top-full z-20 mt-2 w-96 rounded-lg border border-slate-700 bg-slate-950 p-4 shadow-xl">
-                        <div className="mb-2 text-sm font-bold text-cyan-200">Runtime Findings</div>
+                      <div className="absolute left-0 bottom-full z-50 mb-4 w-96 rounded-2xl border border-white/10 bg-background/95 backdrop-blur-xl p-6 shadow-2xl animate-in fade-in slide-in-from-bottom-2">
+                        <div className="mb-4 text-xs font-black text-blue-400 uppercase tracking-widest">Runtime Analysis Baseline</div>
 
                         {(vulnerabilities[container.container_id].runtime_findings || []).length > 0 ? (
-                          <ul className="mb-3 list-disc space-y-1 pl-5 text-xs text-slate-300">
+                          <ul className="mb-4 space-y-2 list-none">
                             {(vulnerabilities[container.container_id].runtime_findings || []).map((finding) => (
-                              <li key={finding}>{finding}</li>
+                              <li key={finding} className="text-xs text-gray-300 font-medium flex items-center gap-2">
+                                <div className="w-1 h-1 rounded-full bg-blue-500" />
+                                {finding}
+                              </li>
                             ))}
                           </ul>
                         ) : (
-                          <div className="mb-3 text-xs text-slate-400">No baseline runtime findings.</div>
+                          <div className="mb-4 text-xs text-gray-500 font-medium italic">No baseline anomalies detected.</div>
                         )}
 
                         {vulnerabilities[container.container_id].recent_alerts?.length > 0 && (
-                          <div className="space-y-2 border-t border-slate-700 pt-2">
-                            {vulnerabilities[container.container_id].recent_alerts.slice(0, 4).map((alert, index) => (
-                              <div key={index} className={`rounded p-2 text-xs ${getCategoryColor(alert.risk_category)}`}>
-                                <div className="font-semibold">{alert.risk_category} • Score {alert.risk_score}</div>
-                                <div className="mt-1 line-clamp-2 text-slate-300">{alert.reason}</div>
+                          <div className="space-y-3 border-t border-white/5 pt-4">
+                            <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Recent Security Pulses</div>
+                            {vulnerabilities[container.container_id].recent_alerts.slice(0, 3).map((alert, index) => (
+                              <div key={index} className="rounded-xl p-3 bg-white/5 border border-white/5">
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="text-[10px] font-black text-white uppercase tracking-widest">{alert.risk_category}</span>
+                                  <span className="text-[10px] font-mono text-gray-500">SCORE {alert.risk_score}</span>
+                                </div>
+                                <div className="text-[10px] text-gray-400 font-medium line-clamp-1">{alert.reason}</div>
                               </div>
                             ))}
                           </div>
@@ -204,14 +189,19 @@ export default function Containers() {
                       </div>
                     )}
                   </td>
-                  <td className="py-4">{container.alert_count}</td>
-                  <td className="py-4 pr-4">
+                  <td className="px-6 py-5 font-mono text-xs text-blue-400">
+                    {container.alert_count}
+                  </td>
+                  <td className="px-6 py-5 text-right">
                     {container.status !== 'quarantined' ? (
-                      <button onClick={() => handleQuarantine(container.container_id)} className="rounded bg-rose-600 px-3 py-1 text-xs transition hover:bg-rose-700">
-                        Quarantine
+                      <button 
+                        onClick={() => handleQuarantine(container.container_id)} 
+                        className="rounded-xl bg-rose-600/10 text-rose-400 border border-rose-500/20 px-4 py-2 text-[10px] font-black uppercase tracking-widest transition-all hover:bg-rose-600/20 active:scale-95 cursor-pointer"
+                      >
+                        Isolate Workload
                       </button>
                     ) : (
-                      <span className="text-xs font-semibold text-rose-300">Quarantined</span>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-rose-400 bg-rose-500/10 border border-rose-500/20 px-4 py-2 rounded-xl">Quarantined</span>
                     )}
                   </td>
                 </tr>

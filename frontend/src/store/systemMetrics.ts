@@ -9,6 +9,10 @@ export interface SystemMetrics {
   memoryUsage: number;
   networkConnections: number;
   lastUpdated: string;
+  // Dashboard specific metrics
+  quarantined_containers?: number;
+  events_24h?: number;
+  critical_alerts?: number;
 }
 
 export interface SecurityEvent {
@@ -25,7 +29,7 @@ export interface SecurityEvent {
 export interface Container {
   id: string;
   name: string;
-  status: 'running' | 'stopped' | 'paused';
+  status: 'running' | 'stopped' | 'paused' | 'quarantined';
   image: string;
   pid: number;
   riskScore: number;
@@ -35,14 +39,20 @@ export interface Container {
 }
 
 export interface Alert {
-  id: string;
+  alert_id?: string;
+  id?: string; // for compatibility
   timestamp: string;
-  severity: 'low' | 'medium' | 'high' | 'critical';
-  title: string;
-  message: string;
-  containerName: string;
-  eventType: string;
-  status: 'new' | 'acknowledged' | 'resolved';
+  severity: 'low' | 'medium' | 'high' | 'critical' | string;
+  title?: string;
+  message?: string;
+  reason?: string;
+  container_id?: string;
+  container_name?: string;
+  containerName?: string;
+  eventType?: string;
+  status?: 'new' | 'acknowledged' | 'resolved';
+  acknowledged?: boolean;
+  risk_score?: number;
 }
 
 interface MetricsStore {
@@ -50,6 +60,8 @@ interface MetricsStore {
   events: SecurityEvent[];
   containers: Container[];
   alerts: Alert[];
+  loading: boolean;
+  error: string | null;
   
   setMetrics: (metrics: Partial<SystemMetrics>) => void;
   addEvent: (event: SecurityEvent) => void;
@@ -60,6 +72,8 @@ interface MetricsStore {
   setAlerts: (alerts: Alert[]) => void;
   updateContainerRisk: (containerId: string, riskScore: number) => void;
   clearOldEvents: (olderThan: number) => void;
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
 }
 
 const defaultMetrics: SystemMetrics = {
@@ -71,6 +85,9 @@ const defaultMetrics: SystemMetrics = {
   memoryUsage: 0,
   networkConnections: 0,
   lastUpdated: new Date().toISOString(),
+  quarantined_containers: 0,
+  events_24h: 0,
+  critical_alerts: 0,
 };
 
 export const useSystemMetrics = create<MetricsStore>(
@@ -79,15 +96,20 @@ export const useSystemMetrics = create<MetricsStore>(
     events: [],
     containers: [],
     alerts: [],
+    loading: false,
+    error: null,
 
     setMetrics: (newMetrics: Partial<SystemMetrics>) =>
-      set((state: MetricsStore) => ({
-        metrics: {
+      set((state: MetricsStore) => {
+        const updatedMetrics = {
           ...state.metrics,
           ...newMetrics,
           lastUpdated: new Date().toISOString(),
-        },
-      })),
+        };
+        // Simple shallow comparison to prevent no-op updates
+        if (JSON.stringify(state.metrics) === JSON.stringify(updatedMetrics)) return state;
+        return { metrics: updatedMetrics };
+      }),
 
     addEvent: (event: SecurityEvent) =>
       set((state: MetricsStore) => {
@@ -104,7 +126,11 @@ export const useSystemMetrics = create<MetricsStore>(
         };
       }),
 
-    setEvents: (events: SecurityEvent[]) => set(() => ({ events })),
+    setEvents: (events: SecurityEvent[]) => 
+      set((state) => {
+        if (state.events.length === events.length && JSON.stringify(state.events) === JSON.stringify(events)) return state;
+        return { events };
+      }),
 
     addContainer: (container: Container) =>
       set((state: MetricsStore) => ({
@@ -116,31 +142,37 @@ export const useSystemMetrics = create<MetricsStore>(
       })),
 
     setContainers: (containers: Container[]) =>
-      set((state: MetricsStore) => ({
-        containers,
-        metrics: {
-          ...state.metrics,
-          totalContainers: containers.length,
-        },
-      })),
+      set((state: MetricsStore) => {
+        if (state.containers.length === containers.length && JSON.stringify(state.containers) === JSON.stringify(containers)) return state;
+        return {
+          containers,
+          metrics: {
+            ...state.metrics,
+            totalContainers: containers.length,
+          },
+        };
+      }),
 
     addAlert: (alert: Alert) =>
       set((state: MetricsStore) => ({
         alerts: [alert, ...state.alerts],
         metrics: {
           ...state.metrics,
-          activeAlerts: state.alerts.filter((a: Alert) => a.status === 'new').length + 1,
+          activeAlerts: state.alerts.filter((a: Alert) => a.status === 'new' || !a.acknowledged).length + 1,
         },
       })),
 
     setAlerts: (alerts: Alert[]) =>
-      set((state: MetricsStore) => ({
-        alerts,
-        metrics: {
-          ...state.metrics,
-          activeAlerts: alerts.filter((a: Alert) => a.status === 'new').length,
-        },
-      })),
+      set((state: MetricsStore) => {
+        if (state.alerts.length === alerts.length && JSON.stringify(state.alerts) === JSON.stringify(alerts)) return state;
+        return {
+          alerts,
+          metrics: {
+            ...state.metrics,
+            activeAlerts: alerts.filter((a: Alert) => a.status === 'new' || !a.acknowledged).length,
+          },
+        };
+      }),
 
     updateContainerRisk: (containerId: string, riskScore: number) =>
       set((state: MetricsStore) => ({
@@ -155,5 +187,8 @@ export const useSystemMetrics = create<MetricsStore>(
           (e: SecurityEvent) => Date.now() - new Date(e.timestamp).getTime() < olderThanMs
         ),
       })),
+
+    setLoading: (loading: boolean) => set((state) => state.loading === loading ? state : { loading }),
+    setError: (error: string | null) => set((state) => state.error === error ? state : { error }),
   })
 );

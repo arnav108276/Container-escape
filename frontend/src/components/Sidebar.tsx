@@ -7,7 +7,7 @@ import {
   FileText,
   Moon,
   Sun,
-  Monitor,
+  Shield,
 } from "lucide-react";
 import { Button } from "./ui/button";
 
@@ -32,22 +32,22 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="w-64 h-screen border-r border-border bg-card flex flex-col">
+    <aside className="w-64 h-screen border-r border-white/5 bg-background flex flex-col z-50">
       {/* Header */}
-      <div className="border-b border-border p-6">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center">
-            <Monitor className="w-6 h-6 text-white" />
+      <div className="p-8">
+        <div className="flex items-center gap-3 group cursor-pointer" onClick={() => window.location.href='/'}>
+          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
+            <Shield className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-foreground">Guardian</h1>
-            <p className="text-xs text-muted-foreground">Security Monitor</p>
+            <h1 className="text-xl font-black text-white tracking-tighter">GUARDIAN</h1>
+            <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest leading-none mt-1">Enterprise</p>
           </div>
         </div>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto p-4 space-y-2">
+      <nav className="flex-1 overflow-y-auto px-4 space-y-2">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           return (
@@ -55,10 +55,10 @@ export default function Sidebar() {
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-all ${
+                `flex items-center gap-4 rounded-xl px-4 py-3.5 text-xs font-black uppercase tracking-widest transition-all ${
                   isActive
-                    ? "bg-primary text-primary-foreground shadow-lg"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                    ? "bg-blue-600/10 text-blue-400 border border-blue-500/20 shadow-lg"
+                    : "text-gray-500 hover:text-gray-300 hover:bg-white/5"
                 }`
               }
             >
@@ -70,31 +70,28 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="border-t border-border p-4 space-y-3">
+      <div className="p-6 border-t border-white/5 space-y-4">
         {/* Theme Toggle */}
-        <Button
+        <button
           onClick={toggleTheme}
-          variant="outline"
-          className="w-full justify-start gap-2"
-          size="sm"
+          className="w-full flex items-center justify-center gap-3 rounded-xl border border-white/5 bg-white/5 py-3 text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-white/10 transition-all"
         >
           {isDark ? (
             <>
               <Sun className="w-4 h-4" />
-              <span>Light Mode</span>
+              <span>Daylight</span>
             </>
           ) : (
             <>
               <Moon className="w-4 h-4" />
-              <span>Dark Mode</span>
+              <span>Midnight</span>
             </>
           )}
-        </Button>
+        </button>
 
         {/* Version Info */}
-        <div className="text-center px-2 py-2 rounded-lg bg-accent/30 text-xs text-muted-foreground">
-          <div className="font-semibold">v1.0.0</div>
-          <div>Enterprise Edition</div>
+        <div className="text-center px-4 py-3 rounded-xl bg-blue-600/5 border border-blue-500/10 text-[10px] font-black uppercase tracking-widest text-blue-400/60">
+          SEC-VER 1.0.0
         </div>
       </div>
     </aside>

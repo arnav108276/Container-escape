@@ -189,6 +189,18 @@ class EventProcessorOrchestrator:
                 logger.error(f'Error in event processing loop: {e}')
                 self.stats['errors'] += 1
                 await asyncio.sleep(1)
+
+    async def ring_buffer_poll_loop(self) -> None:
+        """Background task: poll the eBPF ring buffer"""
+        while True:
+            try:
+                # Poll ring buffer (non-blocking or small timeout)
+                self.ring_buffer_reader.poll_once(100)
+                await asyncio.sleep(0.01) # Small sleep to yield control
+            except Exception as e:
+                logger.error(f'Error in ring buffer polling loop: {e}')
+                self.stats['errors'] += 1
+                await asyncio.sleep(1)
     
     async def event_sending_loop(self) -> None:
         """Background task: send events to backend in batches"""
@@ -253,6 +265,7 @@ class EventProcessorOrchestrator:
             
             # Start async tasks
             await asyncio.gather(
+                self.ring_buffer_poll_loop(),
                 self.event_processing_loop(),
                 self.event_sending_loop(),
                 self.container_sync_loop(),

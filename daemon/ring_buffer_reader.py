@@ -133,6 +133,13 @@ class RingBufferReader:
             logger.error(f'Failed to start ring buffer polling: {e}')
             raise
     
+    def poll_once(self, timeout: int = 100) -> None:
+        """Poll the ring buffer for new events"""
+        try:
+            self.bpf_obj.ring_buffer_poll(timeout)
+        except Exception as e:
+            logger.error(f'Error polling ring buffer: {e}')
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get ring buffer statistics"""
         return {

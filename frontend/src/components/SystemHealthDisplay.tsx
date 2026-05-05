@@ -26,190 +26,76 @@ const SystemHealthDisplay: React.FC = () => {
         const data = await response.json();
         setHealth(data);
 
-        // Update system metrics based on health data
         setMetrics({
           cpuUsage: data.cpuUsage,
           memoryUsage: data.memoryUsage,
           networkConnections: data.networkConnections,
         });
-
-        setLoading(false);
       } catch (error) {
         console.error('Failed to fetch health:', error);
+      } finally {
         setLoading(false);
       }
     };
 
     fetchHealth();
-    const interval = setInterval(fetchHealth, 5000);
-
+    const interval = setInterval(fetchHealth, 10000);
     return () => clearInterval(interval);
   }, [setMetrics]);
 
   if (loading || !health) {
-    return <div className="text-center py-8">Loading system health...</div>;
+    return <div className="text-center py-12 text-blue-400 font-bold animate-pulse">SYNCHRONIZING TELEMETRY...</div>;
   }
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'healthy':
-        return 'text-green-600 dark:text-green-400';
-      case 'degraded':
-        return 'text-yellow-600 dark:text-yellow-400';
-      case 'unhealthy':
-        return 'text-red-600 dark:text-red-400';
       case 'connected':
-        return 'text-green-600 dark:text-green-400';
-      case 'disconnected':
-        return 'text-red-600 dark:text-red-400';
+        return 'text-emerald-400';
+      case 'degraded':
+        return 'text-amber-400';
       default:
-        return 'text-gray-600 dark:text-gray-400';
+        return 'text-rose-400';
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    if (status === 'healthy' || status === 'connected') return '✓';
-    if (status === 'degraded') return '⚠';
-    if (status === 'unhealthy' || status === 'disconnected') return '✗';
-    return health.ebpfLoaded ? '✓' : '✗';
-  };
-
-  const formatUptime = (milliseconds: number) => {
-    const seconds = Math.floor(milliseconds / 1000);
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    return `${days}d ${hours}h ${minutes}m`;
-  };
-
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
-      <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-        <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-          💻 System Health & Status
+    <div className="border border-white/5 bg-white/5 backdrop-blur-md rounded-2xl overflow-hidden">
+      <div className="px-6 py-4 border-b border-white/5 bg-white/5">
+        <h2 className="text-sm font-bold text-blue-400 uppercase tracking-widest">
+          Node Integrity & Telemetry
         </h2>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
-        {/* Daemon Status */}
-        <div className="border-l-4 border-blue-500 pl-4">
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-2">Daemon Status</p>
-          <div className="flex items-center gap-2 mb-2">
-            <span className={`text-2xl ${getStatusColor(health.daemonStatus)}`}>
-              {getStatusIcon(health.daemonStatus)}
-            </span>
-            <span className={`text-lg font-semibold ${getStatusColor(health.daemonStatus)}`}>
-              {health.daemonStatus.toUpperCase()}
-            </span>
-          </div>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Uptime: {formatUptime(health.daemonUptime)}
-          </p>
-        </div>
-
-        {/* Database Status */}
-        <div className="border-l-4 border-purple-500 pl-4">
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-2">Database</p>
-          <div className="flex items-center gap-2 mb-2">
-            <span className={`text-2xl ${getStatusColor(health.databaseStatus)}`}>
-              {getStatusIcon(health.databaseStatus)}
-            </span>
-            <span className={`text-lg font-semibold ${getStatusColor(health.databaseStatus)}`}>
-              {health.databaseStatus.toUpperCase()}
-            </span>
-          </div>
-          <p className="text-sm text-gray-600 dark:text-gray-400">MongoDB Connection</p>
-        </div>
-
-        {/* eBPF Status */}
-        <div className="border-l-4 border-green-500 pl-4">
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-2">eBPF Programs</p>
-          <div className="flex items-center gap-2 mb-2">
-            <span className={`text-2xl ${health.ebpfLoaded ? 'text-green-600' : 'text-red-600'}`}>
-              {health.ebpfLoaded ? '✓' : '✗'}
-            </span>
-            <span className={`text-lg font-semibold ${health.ebpfLoaded ? 'text-green-600' : 'text-red-600'}`}>
-              {health.ebpfLoaded ? 'LOADED' : 'FAILED'}
-            </span>
-          </div>
-          <p className="text-sm text-gray-600 dark:text-gray-400">LSM Hooks Active</p>
-        </div>
-
-        {/* CPU Usage */}
-        <div className="border-l-4 border-orange-500 pl-4">
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-2">CPU Usage</p>
-          <p className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-            {health.cpuUsage.toFixed(1)}%
-          </p>
-          <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-            <div
-              className={`h-full ${
-                health.cpuUsage > 80 ? 'bg-red-500' : health.cpuUsage > 60 ? 'bg-yellow-500' : 'bg-green-500'
-              }`}
-              style={{ width: `${Math.min(health.cpuUsage, 100)}%` }}
-            />
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-white/5">
+        <div className="bg-background p-6">
+          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Daemon Engine</p>
+          <div className={`text-xl font-black ${getStatusColor(health.daemonStatus)}`}>
+            {health.daemonStatus.toUpperCase()}
           </div>
         </div>
 
-        {/* Memory Usage */}
-        <div className="border-l-4 border-yellow-500 pl-4">
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-2">Memory Usage</p>
-          <p className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-            {health.memoryUsage.toFixed(1)}%
-          </p>
-          <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-            <div
-              className={`h-full ${
-                health.memoryUsage > 80 ? 'bg-red-500' : health.memoryUsage > 60 ? 'bg-yellow-500' : 'bg-green-500'
-              }`}
-              style={{ width: `${Math.min(health.memoryUsage, 100)}%` }}
-            />
+        <div className="bg-background p-6">
+          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">eBPF Runtime</p>
+          <div className={`text-xl font-black ${health.ebpfLoaded ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {health.ebpfLoaded ? 'OPERATIONAL' : 'FAULT'}
           </div>
         </div>
 
-        {/* Network Connections */}
-        <div className="border-l-4 border-cyan-500 pl-4">
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-2">Network Connections</p>
-          <p className="text-3xl font-bold text-gray-900 dark:text-white">
-            {health.networkConnections}
-          </p>
-          <p className="text-sm text-gray-600 dark:text-gray-400">Active Connections</p>
-        </div>
-
-        {/* Ring Buffer Usage */}
-        <div className="border-l-4 border-pink-500 pl-4">
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-2">Ring Buffer Usage</p>
-          <p className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-            {health.ringBufferUsage.toFixed(1)}%
-          </p>
-          <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-            <div
-              className={`h-full ${
-                health.ringBufferUsage > 90 ? 'bg-red-500' : health.ringBufferUsage > 70 ? 'bg-yellow-500' : 'bg-green-500'
-              }`}
-              style={{ width: `${Math.min(health.ringBufferUsage, 100)}%` }}
-            />
+        <div className="bg-background p-6">
+          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">CPU Utilization</p>
+          <div className="text-xl font-black text-white">{health.cpuUsage.toFixed(1)}%</div>
+          <div className="mt-2 w-full h-1 bg-white/10 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500" style={{ width: `${health.cpuUsage}%` }} />
           </div>
         </div>
 
-        {/* Event Queue Size */}
-        <div className="border-l-4 border-indigo-500 pl-4">
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-2">Event Queue Size</p>
-          <p className="text-3xl font-bold text-gray-900 dark:text-white">
-            {health.eventQueueSize}
-          </p>
-          <p className="text-sm text-gray-600 dark:text-gray-400">Pending Events</p>
-        </div>
-
-        {/* Last Health Check */}
-        <div className="border-l-4 border-gray-500 pl-4">
-          <p className="text-gray-500 dark:text-gray-400 text-sm mb-2">Last Health Check</p>
-          <p className="text-sm font-mono text-gray-900 dark:text-gray-300">
-            {new Date(health.lastHealthCheck).toLocaleString()}
-          </p>
-          <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">
-            {((Date.now() - new Date(health.lastHealthCheck).getTime()) / 1000).toFixed(1)}s ago
-          </p>
+        <div className="bg-background p-6">
+          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Memory Load</p>
+          <div className="text-xl font-black text-white">{health.memoryUsage.toFixed(1)}%</div>
+          <div className="mt-2 w-full h-1 bg-white/10 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500" style={{ width: `${health.memoryUsage}%` }} />
+          </div>
         </div>
       </div>
     </div>

@@ -6,10 +6,13 @@ DEFAULT_IGNORED_PREFIXES = "container-escape-,major2-daemon,major2-backend,major
 IGNORED_CONTAINER_PREFIXES = [
     p.strip() for p in os.getenv("IGNORED_CONTAINER_PREFIXES", DEFAULT_IGNORED_PREFIXES).split(",") if p.strip()
 ]
+SHOW_SYSTEM_CONTAINERS = os.getenv("SHOW_SYSTEM_CONTAINERS", "false").lower() == "true"
 
 
 def is_ignored_container(container_id: str = "", container_name: str = "") -> bool:
     """Return True when a container should be excluded from UI/alerts/reports."""
+    if SHOW_SYSTEM_CONTAINERS:
+        return False
     cid = container_id or ""
     cname = container_name or ""
     return any(cname.startswith(prefix) or cid.startswith(prefix) for prefix in IGNORED_CONTAINER_PREFIXES)

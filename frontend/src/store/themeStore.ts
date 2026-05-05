@@ -10,7 +10,12 @@ interface ThemeState {
 
 export const useThemeStore = create<ThemeState>((set) => ({
   theme: 'system',
-  setTheme: (theme) => set({ theme }),
+  setTheme: (theme) => {
+    set({ theme });
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('theme', theme);
+    }
+  },
   getEffectiveTheme: () => {
     if (typeof window === 'undefined') return 'light';
     const stored = window.localStorage.getItem('theme') as ThemeOption | null;

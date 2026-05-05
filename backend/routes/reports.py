@@ -183,11 +183,11 @@ def _calculate_next_run(frequency: str, time_of_day: str, start_at: Optional[dat
 
 
 def _send_report_email(report: dict, recipients: List[str]) -> None:
-    smtp_host = os.getenv("SMTP_HOST")
+    smtp_host = os.getenv("SMTP_SERVER")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER")
+    smtp_user = os.getenv("SMTP_USERNAME")
     smtp_password = os.getenv("SMTP_PASSWORD")
-    smtp_from = os.getenv("REPORT_EMAIL_FROM", f"no-reply@{smtp_host or 'security.local'}")
+    smtp_from = os.getenv("ALERT_EMAIL_FROM", f"no-reply@{smtp_host or 'security.local'}")
     use_tls = os.getenv("SMTP_USE_TLS", "true").strip().lower() in {"1", "true", "yes"}
 
     if not smtp_host or not smtp_user or not smtp_password:

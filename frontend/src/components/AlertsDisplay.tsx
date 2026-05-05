@@ -17,16 +17,16 @@ const getSeverityColor = (severity: string) => {
   }
 };
 
-const getStatusBadge = (status: string) => {
+const getStatusBadge = (status: string = 'new') => {
   switch (status) {
     case 'new':
-      return 'bg-red-500 text-white animate-pulse';
+      return 'bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse';
     case 'acknowledged':
-      return 'bg-yellow-500 text-white';
+      return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
     case 'resolved':
-      return 'bg-green-500 text-white';
+      return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
     default:
-      return 'bg-gray-500 text-white';
+      return 'bg-gray-500/10 text-gray-400 border border-white/10';
   }
 };
 
@@ -40,30 +40,31 @@ const AlertsDisplay: React.FC = () => {
       try {
         const response = await fetch('/api/alerts');
         const data = await response.json();
-        setAlerts(data);
-        setLoading(false);
+        // Backend might return { alerts: [...] } or just [...]
+        setAlerts(data.alerts || data);
       } catch (error) {
         console.error('Failed to fetch alerts:', error);
+      } finally {
         setLoading(false);
       }
     };
 
     fetchAlerts();
-    const interval = setInterval(fetchAlerts, 10000); // Update every 10 seconds
-
+    const interval = setInterval(fetchAlerts, 10000);
     return () => clearInterval(interval);
   }, [setAlerts]);
 
   const filteredAlerts = alerts.filter((alert: Alert) =>
-    filter === 'all' ? true : alert.status === filter
+    filter === 'all' ? true : (alert.status || 'new') === filter
   );
 
-  const handleAcknowledge = async (alertId: string) => {
+  const handleAcknowledge = async (alertId?: string) => {
+    if (!alertId) return;
     try {
       await fetch(`/api/alerts/${alertId}/acknowledge`, { method: 'POST' });
       setAlerts(
         alerts.map((a: Alert) =>
-          a.id === alertId ? { ...a, status: 'acknowledged' as const } : a
+          (a.id || a.alert_id) === alertId ? { ...a, status: 'acknowledged' as const } : a
         )
       );
     } catch (error) {
@@ -71,12 +72,13 @@ const AlertsDisplay: React.FC = () => {
     }
   };
 
-  const handleResolve = async (alertId: string) => {
+  const handleResolve = async (alertId?: string) => {
+    if (!alertId) return;
     try {
       await fetch(`/api/alerts/${alertId}/resolve`, { method: 'POST' });
       setAlerts(
         alerts.map((a: Alert) =>
-          a.id === alertId ? { ...a, status: 'resolved' as const } : a
+          (a.id || a.alert_id) === alertId ? { ...a, status: 'resolved' as const } : a
         )
       );
     } catch (error) {
@@ -85,86 +87,108 @@ const AlertsDisplay: React.FC = () => {
   };
 
   if (loading) {
-    return <div className="text-center py-8">Loading alerts...</div>;
+    return <div className="text-center py-12 text-blue-400 font-bold animate-pulse">MONITORING SECURITY CHANNELS...</div>;
   }
 
   return (
-    <Card className="bg-white dark:bg-gray-800 rounded-lg shadow">
-      <CardHeader className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-            🔔 Security Alerts ({filteredAlerts.length})
-          </h2>
-          <div className="flex gap-2">
+    <Card className="border border-white/5 bg-white/5 backdrop-blur-md rounded-2xl overflow-hidden shadow-2xl">
+      <CardHeader className="px-6 py-6 border-b border-white/5 bg-white/5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-sm font-bold text-blue-400 uppercase tracking-widest">
+              Security Intelligence ({filteredAlerts.length})
+            </h2>
+          </div>
+          <div className="flex bg-background/50 p-1 rounded-xl border border-white/5">
             {(['all', 'new', 'acknowledged', 'resolved'] as const).map((status) => (
               <button
                 key={status}
                 onClick={() => setFilter(status)}
-                className={`px-4 py-2 rounded text-sm font-medium transition ${
+                className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
                   filter === status
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-300'
+                    ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20'
+                    : 'text-gray-500 hover:text-gray-300'
                 }`}
               >
-                {status.charAt(0).toUpperCase() + status.slice(1)}
+                {status}
               </button>
             ))}
           </div>
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-4 p-6">
-        {filteredAlerts.map((alert: Alert) => (
-          <div
-            key={alert.id}
-            className={`p-4 rounded ${getSeverityColor(alert.severity)} flex items-start justify-between gap-4`}
-          >
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <h3 className="font-bold text-lg">{alert.title}</h3>
-                <span className={`px-2 py-1 rounded text-xs font-semibold ${getStatusBadge(alert.status)}`}>
-                  {alert.status.toUpperCase()}
-                </span>
+      <CardContent className="space-y-4 p-6 overflow-y-auto max-h-[600px]">
+        {filteredAlerts.map((alert: Alert, idx) => {
+          const alertId = alert.id || alert.alert_id || `temp-${idx}`;
+          return (
+            <div
+              key={alertId}
+              className={`p-5 rounded-xl border bg-background/40 hover:bg-background/60 transition-all group ${
+                alert.severity === 'critical' ? 'border-rose-500/20' : 'border-white/5'
+              } flex flex-col md:flex-row items-start justify-between gap-6`}
+            >
+              <div className="flex-1 space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest ${getStatusBadge(alert.status)}`}>
+                    {alert.status || 'NEW'}
+                  </span>
+                  <h3 className="font-bold text-white tracking-tight">{alert.title || alert.reason || 'Security Event'}</h3>
+                  <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${
+                    alert.severity === 'critical' ? 'text-rose-400 border-rose-500/20 bg-rose-500/10' : 
+                    alert.severity === 'high' ? 'text-amber-400 border-amber-500/20 bg-amber-500/10' :
+                    'text-blue-400 border-blue-500/20 bg-blue-500/10'
+                  }`}>
+                    {alert.severity}
+                  </span>
+                </div>
+                
+                <p className="text-sm text-gray-400 leading-relaxed font-medium">
+                  {alert.message || alert.reason}
+                </p>
+                
+                <div className="flex flex-wrap gap-x-6 gap-y-2 text-[10px] font-mono uppercase tracking-widest">
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-600">Workload:</span>
+                    <span className="text-blue-400 font-bold">{alert.containerName || alert.container_name || 'System'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-600">Signature:</span>
+                    <span className="text-white">{alert.eventType || 'Generic'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-600">Logged:</span>
+                    <span className="text-gray-400">{new Date(alert.timestamp).toLocaleString()}</span>
+                  </div>
+                </div>
               </div>
-              <p className="text-sm mb-2">{alert.message}</p>
-              <div className="flex gap-4 text-xs">
-                <span>
-                  <strong>Container:</strong> {alert.containerName}
-                </span>
-                <span>
-                  <strong>Event:</strong> {alert.eventType}
-                </span>
-                <span>
-                  <strong>Time:</strong> {new Date(alert.timestamp).toLocaleString()}
-                </span>
+
+              <div className="flex md:flex-col gap-2 w-full md:w-auto">
+                {(alert.status === 'new' || !alert.status) && (
+                  <button
+                    onClick={() => handleAcknowledge(alert.id || alert.alert_id)}
+                    className="flex-1 md:w-24 px-3 py-2 bg-blue-600/10 text-blue-400 border border-blue-500/20 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-600/20 transition-all"
+                  >
+                    Acknowledge
+                  </button>
+                )}
+                {alert.status !== 'resolved' && (
+                  <button
+                    onClick={() => handleResolve(alert.id || alert.alert_id)}
+                    className="flex-1 md:w-24 px-3 py-2 bg-emerald-600/10 text-emerald-400 border border-emerald-500/20 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600/20 transition-all"
+                  >
+                    Resolve
+                  </button>
+                )}
               </div>
             </div>
-            <div className="flex gap-2">
-              {alert.status === 'new' && (
-                <button
-                  onClick={() => handleAcknowledge(alert.id)}
-                  className="px-3 py-1 bg-yellow-500 text-white rounded text-sm hover:bg-yellow-600 transition"
-                >
-                  Ack
-                </button>
-              )}
-              {alert.status !== 'resolved' && (
-                <button
-                  onClick={() => handleResolve(alert.id)}
-                  className="px-3 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600 transition"
-                >
-                  Resolve
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </CardContent>
 
       {filteredAlerts.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-gray-500 dark:text-gray-400">
-            {filter === 'all' ? 'No alerts' : `No ${filter} alerts`}
+        <div className="text-center py-20">
+          <p className="text-xs font-bold text-gray-600 uppercase tracking-[0.2em]">
+            {filter === 'all' ? 'CLEAN RECORD: NO INCIDENTS DETECTED' : `NO ${filter} INCIDENTS IN QUEUE`}
           </p>
         </div>
       )}
