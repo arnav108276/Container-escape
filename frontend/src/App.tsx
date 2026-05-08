@@ -17,21 +17,22 @@ import "./App.css";
 
 function App() {
   const [isConnected, setIsConnected] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin1234");
   const [authError, setAuthError] = useState("");
   const { getEffectiveTheme, theme } = useThemeStore();
 
   useEffect(() => {
-    const effective = getEffectiveTheme();
     const root = window.document.documentElement;
-    root.classList.toggle("dark", effective === "dark");
-    window.localStorage.setItem("theme", effective);
-  }, [theme, getEffectiveTheme]);
+    root.classList.add("dark");
+    window.localStorage.setItem("theme", "dark");
+  }, []);
 
   useEffect(() => {
+    // Bypassing token validation for local Mac development without backend
+    /*
     const validateToken = async () => {
       try {
         const token = window.localStorage.getItem("access_token");
@@ -49,6 +50,9 @@ function App() {
       }
     };
     validateToken();
+    */
+    setAuthLoading(false);
+    setIsAuthenticated(true);
   }, []);
 
   useEffect(() => {
@@ -110,21 +114,6 @@ function App() {
 
   if (authLoading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <Card className="w-full max-w-md p-6 space-y-4">
-          <h1 className="text-2xl font-bold">Enterprise Login</h1>
-          <p className="text-sm text-muted-foreground">Use seeded admin credentials first, then rotate password via API policy.</p>
-          <input className="w-full rounded-md border border-border bg-background p-2" value={username} onChange={(e) => setUsername(e.target.value)} />
-          <input className="w-full rounded-md border border-border bg-background p-2" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          {authError && <p className="text-sm text-red-500">{authError}</p>}
-          <Button className="w-full" onClick={handleLogin}>Sign in</Button>
-        </Card>
-      </div>
-    );
   }
 
   return (

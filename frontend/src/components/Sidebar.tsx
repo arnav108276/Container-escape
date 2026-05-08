@@ -1,15 +1,11 @@
 import { NavLink } from "react-router-dom";
-import { useThemeStore } from "../store/themeStore";
 import {
   LayoutDashboard,
   Container,
   AlertCircle,
   FileText,
-  Moon,
-  Sun,
   Shield,
 } from "lucide-react";
-import { Button } from "./ui/button";
 
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -19,18 +15,6 @@ const NAV_ITEMS = [
 ];
 
 export default function Sidebar() {
-  const { theme, setTheme, getEffectiveTheme } = useThemeStore();
-  const effectiveTheme = getEffectiveTheme();
-  const isDark = effectiveTheme === "dark";
-
-  const toggleTheme = () => {
-    if (theme === "system") {
-      setTheme(isDark ? "light" : "dark");
-    } else {
-      setTheme(theme === "dark" ? "light" : "dark");
-    }
-  };
-
   return (
     <aside className="w-64 h-screen border-r border-white/5 bg-background flex flex-col z-50">
       {/* Header */}
@@ -71,24 +55,6 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="p-6 border-t border-white/5 space-y-4">
-        {/* Theme Toggle */}
-        <button
-          onClick={toggleTheme}
-          className="w-full flex items-center justify-center gap-3 rounded-xl border border-white/5 bg-white/5 py-3 text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-white/10 transition-all"
-        >
-          {isDark ? (
-            <>
-              <Sun className="w-4 h-4" />
-              <span>Daylight</span>
-            </>
-          ) : (
-            <>
-              <Moon className="w-4 h-4" />
-              <span>Midnight</span>
-            </>
-          )}
-        </button>
-
         {/* Version Info */}
         <div className="text-center px-4 py-3 rounded-xl bg-blue-600/5 border border-blue-500/10 text-[10px] font-black uppercase tracking-widest text-blue-400/60">
           SEC-VER 1.0.0

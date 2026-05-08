@@ -8,19 +8,10 @@ interface ThemeState {
   getEffectiveTheme: () => ThemeOption;
 }
 
-export const useThemeStore = create<ThemeState>((set) => ({
-  theme: 'system',
+export const useThemeStore = create<ThemeState>((set, get) => ({
+  theme: 'dark',
   setTheme: (theme) => {
-    set({ theme });
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('theme', theme);
-    }
+    // No-op to lock theme to dark
   },
-  getEffectiveTheme: () => {
-    if (typeof window === 'undefined') return 'light';
-    const stored = window.localStorage.getItem('theme') as ThemeOption | null;
-    if (stored) return stored;
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
-    return 'light';
-  },
+  getEffectiveTheme: () => 'dark',
 }));
